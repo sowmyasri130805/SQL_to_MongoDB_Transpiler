@@ -6,9 +6,9 @@ _tabversion = '3.10'
 
 _lr_method = 'LALR'
 
-_lr_signature = 'leftORleftANDAND COMMA EQ FROM GE GT IDENTIFIER LE LT NE NUMBER OR SELECT SEMICOLON STAR STRING WHEREquery : SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLONselect_list : STARselect_list : column_listcolumn_list : IDENTIFIERcolumn_list : column_list COMMA IDENTIFIERwhere_clause_opt : WHERE condition\n                            | emptycondition : condition AND condition\n                     | condition OR conditioncondition : comparisoncomparison : IDENTIFIER operator literaloperator : EQ\n                    | NE\n                    | GT\n                    | LT\n                    | GE\n                    | LEliteral : NUMBERliteral : STRINGempty :'
+_lr_signature = 'leftORleftANDAND ASC AVG BETWEEN BY COMMA COUNT DESC EQ FROM GE GT IDENTIFIER IN LE LIMIT LPAREN LT MAX MIN NE NUMBER OR ORDER RPAREN SELECT SEMICOLON STAR STRING SUM WHEREquery : SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLONselect_list : STARselect_list : column_listcolumn_list : columncolumn_list : column_list COMMA columncolumn : IDENTIFIERcolumn : COUNT LPAREN STAR RPAREN\n                  | COUNT LPAREN IDENTIFIER RPAREN\n                  | MIN LPAREN IDENTIFIER RPAREN\n                  | MAX LPAREN IDENTIFIER RPAREN\n                  | AVG LPAREN IDENTIFIER RPAREN\n                  | SUM LPAREN IDENTIFIER RPARENwhere_clause_opt : WHERE condition\n                            | emptycondition : condition AND condition\n                     | condition OR conditioncondition : comparisoncomparison : IDENTIFIER operator literalcomparison : IDENTIFIER BETWEEN literal AND literalliteral_list : literalliteral_list : literal_list COMMA literalcomparison : IDENTIFIER IN LPAREN literal_list RPARENoperator : EQ\n                    | NE\n                    | GT\n                    | LT\n                    | GE\n                    | LEliteral : NUMBERliteral : STRINGorder_by_clause_opt : ORDER BY order_list\n                               | emptyorder_list : order_itemorder_list : order_list COMMA order_itemorder_item : IDENTIFIERorder_item : IDENTIFIER ASC\n                      | IDENTIFIER DESClimit_clause_opt : LIMIT NUMBER\n                            | emptyempty :'
     
-_lr_action_items = {'SELECT':([0,],[2,]),'$end':([1,14,],[0,-1,]),'STAR':([2,],[5,]),'IDENTIFIER':([2,7,8,12,18,19,],[4,9,10,17,17,17,]),'FROM':([3,4,5,6,10,],[7,-4,-2,-3,-5,]),'COMMA':([4,6,10,],[-4,8,-5,]),'WHERE':([9,],[12,]),'SEMICOLON':([9,11,13,15,16,27,28,29,30,31,],[-20,14,-7,-6,-10,-8,-9,-11,-18,-19,]),'AND':([15,16,27,28,29,30,31,],[18,-10,-8,18,-11,-18,-19,]),'OR':([15,16,27,28,29,30,31,],[19,-10,-8,-9,-11,-18,-19,]),'EQ':([17,],[21,]),'NE':([17,],[22,]),'GT':([17,],[23,]),'LT':([17,],[24,]),'GE':([17,],[25,]),'LE':([17,],[26,]),'NUMBER':([20,21,22,23,24,25,26,],[30,-12,-13,-14,-15,-16,-17,]),'STRING':([20,21,22,23,24,25,26,],[31,-12,-13,-14,-15,-16,-17,]),}
+_lr_action_items = {'SELECT':([0,],[2,]),'$end':([1,58,],[0,-1,]),'STAR':([2,15,],[5,22,]),'IDENTIFIER':([2,13,14,15,16,17,18,19,29,46,47,48,70,],[4,20,4,23,24,25,26,27,42,62,42,42,62,]),'COUNT':([2,14,],[8,8,]),'MIN':([2,14,],[9,9,]),'MAX':([2,14,],[10,10,]),'AVG':([2,14,],[11,11,]),'SUM':([2,14,],[12,12,]),'FROM':([3,4,5,6,7,21,31,32,33,34,35,36,],[13,-6,-2,-3,-4,-5,-7,-8,-9,-10,-11,-12,]),'COMMA':([4,6,7,21,31,32,33,34,35,36,60,61,62,66,67,71,72,74,75,76,80,],[-6,14,-4,-5,-7,-8,-9,-10,-11,-12,70,-33,-35,-29,-30,-36,-37,79,-20,-34,-21,]),'LPAREN':([8,9,10,11,12,51,],[15,16,17,18,19,69,]),'WHERE':([20,],[29,]),'ORDER':([20,28,30,40,41,63,64,65,66,67,77,78,],[-40,38,-14,-13,-17,-15,-16,-18,-29,-30,-19,-22,]),'LIMIT':([20,28,30,37,39,40,41,60,61,62,63,64,65,66,67,71,72,76,77,78,],[-40,-40,-14,44,-32,-13,-17,-31,-33,-35,-15,-16,-18,-29,-30,-36,-37,-34,-19,-22,]),'SEMICOLON':([20,28,30,37,39,40,41,43,45,59,60,61,62,63,64,65,66,67,71,72,76,77,78,],[-40,-40,-14,-40,-32,-13,-17,58,-39,-38,-31,-33,-35,-15,-16,-18,-29,-30,-36,-37,-34,-19,-22,]),'RPAREN':([22,23,24,25,26,27,66,67,74,75,80,],[31,32,33,34,35,36,-29,-30,78,-20,-21,]),'BY':([38,],[46,]),'AND':([40,41,63,64,65,66,67,68,77,78,],[47,-17,-15,47,-18,-29,-30,73,-19,-22,]),'OR':([40,41,63,64,65,66,67,77,78,],[48,-17,-15,-16,-18,-29,-30,-19,-22,]),'BETWEEN':([42,],[50,]),'IN':([42,],[51,]),'EQ':([42,],[52,]),'NE':([42,],[53,]),'GT':([42,],[54,]),'LT':([42,],[55,]),'GE':([42,],[56,]),'LE':([42,],[57,]),'NUMBER':([44,49,50,52,53,54,55,56,57,69,73,79,],[59,66,66,-23,-24,-25,-26,-27,-28,66,66,66,]),'STRING':([49,50,52,53,54,55,56,57,69,73,79,],[67,67,-23,-24,-25,-26,-27,-28,67,67,67,]),'ASC':([62,],[71,]),'DESC':([62,],[72,]),}
 
 _lr_action = {}
 for _k, _v in _lr_action_items.items():
@@ -17,7 +17,7 @@ for _k, _v in _lr_action_items.items():
       _lr_action[_x][_k] = _y
 del _lr_action_items
 
-_lr_goto_items = {'query':([0,],[1,]),'select_list':([2,],[3,]),'column_list':([2,],[6,]),'where_clause_opt':([9,],[11,]),'empty':([9,],[13,]),'condition':([12,18,19,],[15,27,28,]),'comparison':([12,18,19,],[16,16,16,]),'operator':([17,],[20,]),'literal':([20,],[29,]),}
+_lr_goto_items = {'query':([0,],[1,]),'select_list':([2,],[3,]),'column_list':([2,],[6,]),'column':([2,14,],[7,21,]),'where_clause_opt':([20,],[28,]),'empty':([20,28,37,],[30,39,45,]),'order_by_clause_opt':([28,],[37,]),'condition':([29,47,48,],[40,63,64,]),'comparison':([29,47,48,],[41,41,41,]),'limit_clause_opt':([37,],[43,]),'operator':([42,],[49,]),'order_list':([46,],[60,]),'order_item':([46,70,],[61,76,]),'literal':([49,50,69,73,79,],[65,68,75,77,80,]),'literal_list':([69,],[74,]),}
 
 _lr_goto = {}
 for _k, _v in _lr_goto_items.items():
@@ -27,24 +27,44 @@ for _k, _v in _lr_goto_items.items():
 del _lr_goto_items
 _lr_productions = [
   ("S' -> query","S'",1,None,None,None),
-  ('query -> SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLON','query',6,'p_query','sql_parser.py',19),
+  ('query -> SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON','query',8,'p_query','sql_parser.py',19),
   ('select_list -> STAR','select_list',1,'p_select_list_star','sql_parser.py',23),
   ('select_list -> column_list','select_list',1,'p_select_list_columns','sql_parser.py',27),
-  ('column_list -> IDENTIFIER','column_list',1,'p_column_list_single','sql_parser.py',31),
-  ('column_list -> column_list COMMA IDENTIFIER','column_list',3,'p_column_list_multi','sql_parser.py',35),
-  ('where_clause_opt -> WHERE condition','where_clause_opt',2,'p_where_clause_opt','sql_parser.py',39),
-  ('where_clause_opt -> empty','where_clause_opt',1,'p_where_clause_opt','sql_parser.py',40),
-  ('condition -> condition AND condition','condition',3,'p_condition_visual','sql_parser.py',47),
-  ('condition -> condition OR condition','condition',3,'p_condition_visual','sql_parser.py',48),
-  ('condition -> comparison','condition',1,'p_condition_comparison','sql_parser.py',52),
-  ('comparison -> IDENTIFIER operator literal','comparison',3,'p_comparison','sql_parser.py',56),
-  ('operator -> EQ','operator',1,'p_operator','sql_parser.py',60),
-  ('operator -> NE','operator',1,'p_operator','sql_parser.py',61),
-  ('operator -> GT','operator',1,'p_operator','sql_parser.py',62),
-  ('operator -> LT','operator',1,'p_operator','sql_parser.py',63),
-  ('operator -> GE','operator',1,'p_operator','sql_parser.py',64),
-  ('operator -> LE','operator',1,'p_operator','sql_parser.py',65),
-  ('literal -> NUMBER','literal',1,'p_literal_number','sql_parser.py',69),
-  ('literal -> STRING','literal',1,'p_literal_string','sql_parser.py',73),
-  ('empty -> <empty>','empty',0,'p_empty','sql_parser.py',77),
+  ('column_list -> column','column_list',1,'p_column_list_single','sql_parser.py',31),
+  ('column_list -> column_list COMMA column','column_list',3,'p_column_list_multi','sql_parser.py',35),
+  ('column -> IDENTIFIER','column',1,'p_column_identifier','sql_parser.py',39),
+  ('column -> COUNT LPAREN STAR RPAREN','column',4,'p_column_aggregate','sql_parser.py',43),
+  ('column -> COUNT LPAREN IDENTIFIER RPAREN','column',4,'p_column_aggregate','sql_parser.py',44),
+  ('column -> MIN LPAREN IDENTIFIER RPAREN','column',4,'p_column_aggregate','sql_parser.py',45),
+  ('column -> MAX LPAREN IDENTIFIER RPAREN','column',4,'p_column_aggregate','sql_parser.py',46),
+  ('column -> AVG LPAREN IDENTIFIER RPAREN','column',4,'p_column_aggregate','sql_parser.py',47),
+  ('column -> SUM LPAREN IDENTIFIER RPAREN','column',4,'p_column_aggregate','sql_parser.py',48),
+  ('where_clause_opt -> WHERE condition','where_clause_opt',2,'p_where_clause_opt','sql_parser.py',55),
+  ('where_clause_opt -> empty','where_clause_opt',1,'p_where_clause_opt','sql_parser.py',56),
+  ('condition -> condition AND condition','condition',3,'p_condition_visual','sql_parser.py',63),
+  ('condition -> condition OR condition','condition',3,'p_condition_visual','sql_parser.py',64),
+  ('condition -> comparison','condition',1,'p_condition_comparison','sql_parser.py',68),
+  ('comparison -> IDENTIFIER operator literal','comparison',3,'p_comparison','sql_parser.py',72),
+  ('comparison -> IDENTIFIER BETWEEN literal AND literal','comparison',5,'p_comparison_between','sql_parser.py',76),
+  ('literal_list -> literal','literal_list',1,'p_literal_list_single','sql_parser.py',83),
+  ('literal_list -> literal_list COMMA literal','literal_list',3,'p_literal_list_multi','sql_parser.py',87),
+  ('comparison -> IDENTIFIER IN LPAREN literal_list RPAREN','comparison',5,'p_comparison_in','sql_parser.py',91),
+  ('operator -> EQ','operator',1,'p_operator','sql_parser.py',99),
+  ('operator -> NE','operator',1,'p_operator','sql_parser.py',100),
+  ('operator -> GT','operator',1,'p_operator','sql_parser.py',101),
+  ('operator -> LT','operator',1,'p_operator','sql_parser.py',102),
+  ('operator -> GE','operator',1,'p_operator','sql_parser.py',103),
+  ('operator -> LE','operator',1,'p_operator','sql_parser.py',104),
+  ('literal -> NUMBER','literal',1,'p_literal_number','sql_parser.py',108),
+  ('literal -> STRING','literal',1,'p_literal_string','sql_parser.py',112),
+  ('order_by_clause_opt -> ORDER BY order_list','order_by_clause_opt',3,'p_order_by_clause_opt','sql_parser.py',116),
+  ('order_by_clause_opt -> empty','order_by_clause_opt',1,'p_order_by_clause_opt','sql_parser.py',117),
+  ('order_list -> order_item','order_list',1,'p_order_list_single','sql_parser.py',123),
+  ('order_list -> order_list COMMA order_item','order_list',3,'p_order_list_multiple','sql_parser.py',127),
+  ('order_item -> IDENTIFIER','order_item',1,'p_order_item_default','sql_parser.py',131),
+  ('order_item -> IDENTIFIER ASC','order_item',2,'p_order_item_direction','sql_parser.py',135),
+  ('order_item -> IDENTIFIER DESC','order_item',2,'p_order_item_direction','sql_parser.py',136),
+  ('limit_clause_opt -> LIMIT NUMBER','limit_clause_opt',2,'p_limit_clause_opt','sql_parser.py',140),
+  ('limit_clause_opt -> empty','limit_clause_opt',1,'p_limit_clause_opt','sql_parser.py',141),
+  ('empty -> <empty>','empty',0,'p_empty','sql_parser.py',148),
 ]

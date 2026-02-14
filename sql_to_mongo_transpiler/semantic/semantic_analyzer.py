@@ -1,4 +1,4 @@
-from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison
+from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison,Aggregate
 
 class SemanticError(Exception):
     pass
@@ -33,19 +33,29 @@ class SemanticAnalyzer:
         if columns == ['*']:
             return
 
+
         # Check for duplicates
-        if len(columns) != len(set(columns)):
-            seen = set()
-            for col in columns:
+        seen = set()
+        for col in columns:
+            if isinstance(col, str):
                 if col in seen:
                     raise SemanticError(f"Duplicate column '{col}' in SELECT list")
                 seen.add(col)
 
-        # Check existence
-        for col in columns:
-            if col not in table_schema:
-                raise SemanticError(f"Column '{col}' does not exist in table '{table_name}'")
-
+            if isinstance(col, str):
+                if col not in table_schema:
+                    raise SemanticError(f"Column '{col}' does not exist in table '{table_name}'")
+            # Aggregate
+            elif isinstance(col, Aggregate):
+                # COUNT(*) is always valid
+                if col.func == "COUNT" and col.column == "*":
+                    continue
+                # For MIN/MAX/AVG/SUM column must exist
+                if col.column not in table_schema:
+                    raise SemanticError(f"Column '{col.column}' does not exist in table '{table_name}'"
+                )
+            else:
+                raise SemanticError(f"Invalid column type: {col}")
     def validate_condition(self, node, table_name):
         if isinstance(node, LogicalCondition):
             self.validate_condition(node.left, table_name)
@@ -64,7 +74,30 @@ class SemanticAnalyzer:
         # Type checking
         expected_type = table_schema[col_name]
         actual_value = node.value
-        
+        # ----- BETWEEN -----
+        if node.operator == "BETWEEN":
+            if not isinstance(actual_value, tuple) or len(actual_value) != 2:
+                raise SemanticError("Invalid BETWEEN syntax")
+            lower, upper = actual_value
+            if expected_type == 'int':
+                if not isinstance(lower, int) or not isinstance(upper, int):
+                    raise SemanticError(f"Type mismatch for column '{col_name}'. Expected int.")
+            elif expected_type == 'string':
+                if not isinstance(lower, str) or not isinstance(upper, str):
+                    raise SemanticError(
+                            f"Type mismatch for column '{col_name}'. Expected string.")
+            return
+        # ----- IN -----
+        if node.operator == "IN":
+            if not isinstance(actual_value, list):
+                raise SemanticError("Invalid IN syntax")
+            for val in actual_value:
+                if expected_type == 'int' and not isinstance(val, int):
+                    raise SemanticError(f"Type mismatch for column '{col_name}'. Expected int.")
+                if expected_type == 'string' and not isinstance(val, str):
+                    raise SemanticError(f"Type mismatch for column '{col_name}'. Expected string.")
+            return
+
         # Determine actual type
         if isinstance(actual_value, int):
             actual_type = 'int'

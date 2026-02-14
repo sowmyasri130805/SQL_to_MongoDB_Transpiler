@@ -35,21 +35,58 @@ class LogicalCondition(ASTNode):
                 f"    right={right_repr}\n"
                 f")")
 
+class OrderByItem(ASTNode):
+    """Represents a single ORDER BY item"""
+    def __init__(self, column: str, direction: str = "ASC"):
+        self.column = column
+        self.direction = direction.upper()
+
+    def __repr__(self):
+        return (f"OrderByItem(\n"
+                f"    column='{self.column}',\n"
+                f"    direction='{self.direction}'\n"
+                f")")
+
+class Aggregate(ASTNode):
+    """Represents an aggregate function like COUNT, MIN, MAX, AVG, SUM"""
+    def __init__(self, func: str, column: str):
+        self.func = func.upper()
+        self.column = column  # '*' or column name
+
+    def __repr__(self):
+        return (f"Aggregate(\n"
+                f"    func='{self.func}',\n"
+                f"    column='{self.column}'\n"
+                f")")
+
+
 class SelectQuery(ASTNode):
     """Represents a SELECT query"""
-    def __init__(self, columns: List[str], table: str, where: Optional[ASTNode] = None):
+    def __init__(self, columns: List[Union[str,Aggregate]], table: str, where: Optional[ASTNode] = None,order_by:Optional[List[OrderByItem]] = None,limit:Optional[int] = None,offset:Optional[int] = None):
         self.columns = columns
         self.table = table
         self.where = where
+        self.order_by = order_by or []
+        self.limit = limit
+        self.offset = offset
 
     def __repr__(self):
         if self.where:
             where_repr = repr(self.where).replace('\n', '\n    ')
         else:
             where_repr = 'None'
+        if self.order_by:
+            order_repr = "[\n        " + ",\n        ".join(
+                repr(o).replace('\n', '\n        ') for o in self.order_by
+            ) + "\n    ]"
+        else:
+            order_repr = "[]"
             
         return (f"SelectQuery(\n"
                 f"    columns={self.columns},\n"
                 f"    table='{self.table}',\n"
-                f"    where={where_repr}\n"
+                f"    where={where_repr},\n"
+                f"    order_by={order_repr},\n"
+                f"    limit={self.limit},\n"
+                f"    offset={self.offset}\n"
                 f")")

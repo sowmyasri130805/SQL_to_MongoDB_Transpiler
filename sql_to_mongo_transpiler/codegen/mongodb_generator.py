@@ -1,27 +1,69 @@
-from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison
+from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison,OrderByItem,Aggregate
 import json
 
 class MongoDBGenerator:
+    def _has_aggregate(self, node):
+        for col in node.columns:
+            if isinstance(col, Aggregate):
+                return True
+        return False
+
     def generate(self, ast):
-        if isinstance(ast, SelectQuery):
+        if self._has_aggregate(ast):
+            return self._generate_aggregate(ast)
+        elif isinstance(ast, SelectQuery):
             return self._generate_find(ast)
         else:
             raise ValueError(f"Unsupported AST node: {type(ast)}")
+    def _generate_aggregate(self, node):
+        pipeline = []
+        # WHERE → $match
+        if node.where:
+            match_stage = {"$match": self._generate_filter(node.where)}
+            pipeline.append(match_stage)
+        group_stage = { "_id": None }
+        for col in node.columns:
+            if isinstance(col, Aggregate):
+                func = col.func
+                column = col.column
+                if func == "COUNT" and column == "*":
+                    group_stage["count"] = { "$sum": 1 }
+                else:
+                    mongo_operator = {
+                            "MIN": "$min",
+                            "MAX": "$max",
+                            "AVG": "$avg",
+                            "SUM": "$sum"
+                            }.get(func)
+                    group_stage[f"{func.lower()}_{column}"] = {mongo_operator: f"${column}"}
+        pipeline.append({ "$group": group_stage })
+        return f"db.{node.table}.aggregate({pipeline})"
 
     def _generate_find(self, node: SelectQuery):
         collection = node.table
         filter_doc = self._generate_filter(node.where) if node.where else {}
         projection = self._generate_projection(node.columns)
+
         
         # Format as MongoDB shell command (custom format, not JSON)
         filter_str = self._format_mongo_shell(filter_doc)
         
         if projection:
             proj_str = self._format_mongo_shell(projection)
-            return f"db.{collection}.find({filter_str}, {proj_str})"
+            query = f"db.{collection}.find({filter_str}, {proj_str})"
         else:
-            return f"db.{collection}.find({filter_str})"
+            query = f"db.{collection}.find({filter_str})"
 
+        if node.order_by:
+            sort_doc = self._generate_sort(node.order_by)
+            sort_str = self._format_mongo_shell(sort_doc)
+            #print("DEBUG order_by:", node.order_by)
+            #print("DEBUG sort_doc:", sort_doc)
+            query += f".sort({sort_str})"
+
+        if node.limit is not None:
+            query += f".limit({node.limit})"
+        return query
     def _format_mongo_shell(self, obj):
         """Recursively formats Python objects to MongoDB shell syntax (keys unquoted)."""
         if isinstance(obj, dict):
@@ -90,7 +132,15 @@ class MongoDBGenerator:
         # Inequality and ranges
         if operator == '!=':
             return {field: {'$ne': value}}
-        
+
+        # BETWEEN
+        if operator == "BETWEEN":
+            lower, upper = value
+            return {field: {'$gte': lower, '$lte': upper}}
+        # IN
+        if operator == "IN":
+            return {field: {'$in': value}}
+
         op_map = {
             '>': '$gt',
             '<': '$lt',
@@ -103,3 +153,12 @@ class MongoDBGenerator:
             raise ValueError(f"Unknown comparison operator: {operator}")
             
         return {field: {mongo_op: value}}
+    def _generate_sort(self, order_by_list):
+        sort_doc = {}
+        for item in order_by_list:
+            if not isinstance(item, OrderByItem):
+                continue
+            direction = 1 if item.direction.upper() == "ASC" else -1
+            sort_doc[item.column] = direction
+        return sort_doc
+

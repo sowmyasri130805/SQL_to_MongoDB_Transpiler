@@ -27,6 +27,20 @@ class SqlLexer:
         'COMMA',
         'SEMICOLON',
         'STAR',
+        'LIMIT',
+        'ORDER',
+        'BY',
+        'ASC',
+        'DESC',
+        'BETWEEN',
+        'IN',
+        'LPAREN',
+        'RPAREN',
+        'COUNT',
+        'MIN',
+        'MAX',
+        'AVG',
+        'SUM'
     )
 
     # Regular expression rules for simple tokens
@@ -39,7 +53,8 @@ class SqlLexer:
     t_COMMA = r','
     t_SEMICOLON = r';'
     t_STAR = r'\*'
-
+    t_LPAREN=r'\('
+    t_RPAREN=r'\)'
     # Ignored characters (whitespace)
     t_ignore = ' \t'
 
@@ -50,6 +65,18 @@ class SqlLexer:
         'WHERE': 'WHERE',
         'AND': 'AND',
         'OR': 'OR',
+        'LIMIT':'LIMIT',
+        'ORDER':'ORDER',
+        'BY':'BY',
+        'ASC':'ASC',
+        'DESC':'DESC',
+        'IN':'IN',
+        'BETWEEN':'BETWEEN',
+        'COUNT':'COUNT',
+        'MIN':'MIN',
+        'MAX':'MAX',
+        'AVG':'AVG',
+        'SUM':'SUM'
     }
 
     def t_IDENTIFIER(self, t):

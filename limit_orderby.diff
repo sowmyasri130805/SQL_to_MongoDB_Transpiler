@@ -1,0 +1,800 @@
+diff --git a/sql_to_mongo_transpiler/ast/nodes.py b/sql_to_mongo_transpiler/ast/nodes.py
+index fa9fa74..e1c4632 100644
+--- a/sql_to_mongo_transpiler/ast/nodes.py
++++ b/sql_to_mongo_transpiler/ast/nodes.py
+@@ -35,21 +35,46 @@ class LogicalCondition(ASTNode):
+                 f"    right={right_repr}\n"
+                 f")")
+ 
++class OrderByItem(ASTNode):
++    """Represents a single ORDER BY item"""
++    def __init__(self, column: str, direction: str = "ASC"):
++        self.column = column
++        self.direction = direction.upper()
++
++    def __repr__(self):
++        return (f"OrderByItem(\n"
++                f"    column='{self.column}',\n"
++                f"    direction='{self.direction}'\n"
++                f")")
++
++
+ class SelectQuery(ASTNode):
+     """Represents a SELECT query"""
+-    def __init__(self, columns: List[str], table: str, where: Optional[ASTNode] = None):
++    def __init__(self, columns: List[str], table: str, where: Optional[ASTNode] = None,order_by:Optional[List[OrderByItem]] = None,limit:Optional[int] = None,offset:Optional[int] = None):
+         self.columns = columns
+         self.table = table
+         self.where = where
++        self.order_by = order_by or []
++        self.limit = limit
++        self.offset = offset
+ 
+     def __repr__(self):
+         if self.where:
+             where_repr = repr(self.where).replace('\n', '\n    ')
+         else:
+             where_repr = 'None'
++        if self.order_by:
++            order_repr = "[\n        " + ",\n        ".join(
++                repr(o).replace('\n', '\n        ') for o in self.order_by
++            ) + "\n    ]"
++        else:
++            order_repr = "[]"
+             
+         return (f"SelectQuery(\n"
+                 f"    columns={self.columns},\n"
+                 f"    table='{self.table}',\n"
+-                f"    where={where_repr}\n"
++                f"    where={where_repr},\n"
++                f"    order_by={order_repr},\n"
++                f"    limit={self.limit},\n"
++                f"    offset={self.offset}\n"
+                 f")")
+diff --git a/sql_to_mongo_transpiler/codegen/mongodb_generator.py b/sql_to_mongo_transpiler/codegen/mongodb_generator.py
+index d58fca5..d7ffd63 100644
+--- a/sql_to_mongo_transpiler/codegen/mongodb_generator.py
++++ b/sql_to_mongo_transpiler/codegen/mongodb_generator.py
+@@ -1,4 +1,4 @@
+-from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison
++from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison,OrderByItem
+ import json
+ 
+ class MongoDBGenerator:
+@@ -12,16 +12,27 @@ class MongoDBGenerator:
+         collection = node.table
+         filter_doc = self._generate_filter(node.where) if node.where else {}
+         projection = self._generate_projection(node.columns)
++
+         
+         # Format as MongoDB shell command (custom format, not JSON)
+         filter_str = self._format_mongo_shell(filter_doc)
+         
+         if projection:
+             proj_str = self._format_mongo_shell(projection)
+-            return f"db.{collection}.find({filter_str}, {proj_str})"
++            query = f"db.{collection}.find({filter_str}, {proj_str})"
+         else:
+-            return f"db.{collection}.find({filter_str})"
++            query = f"db.{collection}.find({filter_str})"
++
++        if node.order_by:
++            sort_doc = self._generate_sort(node.order_by)
++            sort_str = self._format_mongo_shell(sort_doc)
++            #print("DEBUG order_by:", node.order_by)
++            #print("DEBUG sort_doc:", sort_doc)
++            query += f".sort({sort_str})"
+ 
++        if node.limit is not None:
++            query += f".limit({node.limit})"
++        return query
+     def _format_mongo_shell(self, obj):
+         """Recursively formats Python objects to MongoDB shell syntax (keys unquoted)."""
+         if isinstance(obj, dict):
+@@ -103,3 +114,12 @@ class MongoDBGenerator:
+             raise ValueError(f"Unknown comparison operator: {operator}")
+             
+         return {field: {mongo_op: value}}
++    def _generate_sort(self, order_by_list):
++        sort_doc = {}
++        for item in order_by_list:
++            if not isinstance(item, OrderByItem):
++                continue
++            direction = 1 if item.direction.upper() == "ASC" else -1
++            sort_doc[item.column] = direction
++        return sort_doc
++
+diff --git a/sql_to_mongo_transpiler/lexer/__pycache__/__init__.cpython-312.pyc b/sql_to_mongo_transpiler/lexer/__pycache__/__init__.cpython-312.pyc
+index bfac049..0f73933 100644
+Binary files a/sql_to_mongo_transpiler/lexer/__pycache__/__init__.cpython-312.pyc and b/sql_to_mongo_transpiler/lexer/__pycache__/__init__.cpython-312.pyc differ
+diff --git a/sql_to_mongo_transpiler/lexer/__pycache__/sql_lexer.cpython-312.pyc b/sql_to_mongo_transpiler/lexer/__pycache__/sql_lexer.cpython-312.pyc
+index ef8e12b..ee29d32 100644
+Binary files a/sql_to_mongo_transpiler/lexer/__pycache__/sql_lexer.cpython-312.pyc and b/sql_to_mongo_transpiler/lexer/__pycache__/sql_lexer.cpython-312.pyc differ
+diff --git a/sql_to_mongo_transpiler/lexer/sql_lexer.py b/sql_to_mongo_transpiler/lexer/sql_lexer.py
+index 662c388..a075311 100644
+--- a/sql_to_mongo_transpiler/lexer/sql_lexer.py
++++ b/sql_to_mongo_transpiler/lexer/sql_lexer.py
+@@ -27,6 +27,11 @@ class SqlLexer:
+         'COMMA',
+         'SEMICOLON',
+         'STAR',
++        'LIMIT',
++        'ORDER',
++        'BY',
++        'ASC',
++        'DESC'
+     )
+ 
+     # Regular expression rules for simple tokens
+@@ -50,6 +55,11 @@ class SqlLexer:
+         'WHERE': 'WHERE',
+         'AND': 'AND',
+         'OR': 'OR',
++        'LIMIT':'LIMIT',
++        'ORDER':'ORDER',
++        'BY':'BY',
++        'ASC':'ASC',
++        'DESC':'DESC'
+     }
+ 
+     def t_IDENTIFIER(self, t):
+diff --git a/sql_to_mongo_transpiler/parser/parser.out b/sql_to_mongo_transpiler/parser/parser.out
+index 21e3cb5..4f75813 100644
+--- a/sql_to_mongo_transpiler/parser/parser.out
++++ b/sql_to_mongo_transpiler/parser/parser.out
+@@ -3,7 +3,7 @@ Created by PLY version 3.11 (http://www.dabeaz.com/ply)
+ Grammar
+ 
+ Rule 0     S' -> query
+-Rule 1     query -> SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLON
++Rule 1     query -> SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON
+ Rule 2     select_list -> STAR
+ Rule 3     select_list -> column_list
+ Rule 4     column_list -> IDENTIFIER
+@@ -22,22 +22,36 @@ Rule 16    operator -> GE
+ Rule 17    operator -> LE
+ Rule 18    literal -> NUMBER
+ Rule 19    literal -> STRING
+-Rule 20    empty -> <empty>
++Rule 20    order_by_clause_opt -> ORDER BY order_list
++Rule 21    order_by_clause_opt -> empty
++Rule 22    order_list -> order_item
++Rule 23    order_list -> order_list COMMA order_item
++Rule 24    order_item -> IDENTIFIER
++Rule 25    order_item -> IDENTIFIER ASC
++Rule 26    order_item -> IDENTIFIER DESC
++Rule 27    limit_clause_opt -> LIMIT NUMBER
++Rule 28    limit_clause_opt -> empty
++Rule 29    empty -> <empty>
+ 
+ Terminals, with rules where they appear
+ 
+ AND                  : 8
+-COMMA                : 5
++ASC                  : 25
++BY                   : 20
++COMMA                : 5 23
++DESC                 : 26
+ EQ                   : 12
+ FROM                 : 1
+ GE                   : 16
+ GT                   : 14
+-IDENTIFIER           : 1 4 5 11
++IDENTIFIER           : 1 4 5 11 24 25 26
+ LE                   : 17
++LIMIT                : 27
+ LT                   : 15
+ NE                   : 13
+-NUMBER               : 18
++NUMBER               : 18 27
+ OR                   : 9
++ORDER                : 20
+ SELECT               : 1
+ SEMICOLON            : 1
+ STAR                 : 2
+@@ -50,9 +64,13 @@ Nonterminals, with rules where they appear
+ column_list          : 3 5
+ comparison           : 10
+ condition            : 6 8 8 9 9
+-empty                : 7
++empty                : 7 21 28
++limit_clause_opt     : 1
+ literal              : 11
+ operator             : 11
++order_by_clause_opt  : 1
++order_item           : 22 23
++order_list           : 20 23
+ query                : 0
+ select_list          : 1
+ where_clause_opt     : 1
+@@ -62,7 +80,7 @@ Parsing method: LALR
+ state 0
+ 
+     (0) S' -> . query
+-    (1) query -> . SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLON
++    (1) query -> . SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON
+ 
+     SELECT          shift and go to state 2
+ 
+@@ -76,7 +94,7 @@ state 1
+ 
+ state 2
+ 
+-    (1) query -> SELECT . select_list FROM IDENTIFIER where_clause_opt SEMICOLON
++    (1) query -> SELECT . select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON
+     (2) select_list -> . STAR
+     (3) select_list -> . column_list
+     (4) column_list -> . IDENTIFIER
+@@ -90,7 +108,7 @@ state 2
+ 
+ state 3
+ 
+-    (1) query -> SELECT select_list . FROM IDENTIFIER where_clause_opt SEMICOLON
++    (1) query -> SELECT select_list . FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON
+ 
+     FROM            shift and go to state 7
+ 
+@@ -121,7 +139,7 @@ state 6
+ 
+ state 7
+ 
+-    (1) query -> SELECT select_list FROM . IDENTIFIER where_clause_opt SEMICOLON
++    (1) query -> SELECT select_list FROM . IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON
+ 
+     IDENTIFIER      shift and go to state 9
+ 
+@@ -135,13 +153,15 @@ state 8
+ 
+ state 9
+ 
+-    (1) query -> SELECT select_list FROM IDENTIFIER . where_clause_opt SEMICOLON
++    (1) query -> SELECT select_list FROM IDENTIFIER . where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON
+     (6) where_clause_opt -> . WHERE condition
+     (7) where_clause_opt -> . empty
+-    (20) empty -> .
++    (29) empty -> .
+ 
+     WHERE           shift and go to state 12
+-    SEMICOLON       reduce using rule 20 (empty -> .)
++    ORDER           reduce using rule 29 (empty -> .)
++    LIMIT           reduce using rule 29 (empty -> .)
++    SEMICOLON       reduce using rule 29 (empty -> .)
+ 
+     where_clause_opt               shift and go to state 11
+     empty                          shift and go to state 13
+@@ -156,10 +176,17 @@ state 10
+ 
+ state 11
+ 
+-    (1) query -> SELECT select_list FROM IDENTIFIER where_clause_opt . SEMICOLON
++    (1) query -> SELECT select_list FROM IDENTIFIER where_clause_opt . order_by_clause_opt limit_clause_opt SEMICOLON
++    (20) order_by_clause_opt -> . ORDER BY order_list
++    (21) order_by_clause_opt -> . empty
++    (29) empty -> .
+ 
+-    SEMICOLON       shift and go to state 14
++    ORDER           shift and go to state 15
++    LIMIT           reduce using rule 29 (empty -> .)
++    SEMICOLON       reduce using rule 29 (empty -> .)
+ 
++    order_by_clause_opt            shift and go to state 14
++    empty                          shift and go to state 16
+ 
+ state 12
+ 
+@@ -169,46 +196,73 @@ state 12
+     (10) condition -> . comparison
+     (11) comparison -> . IDENTIFIER operator literal
+ 
+-    IDENTIFIER      shift and go to state 17
++    IDENTIFIER      shift and go to state 19
+ 
+-    condition                      shift and go to state 15
+-    comparison                     shift and go to state 16
++    condition                      shift and go to state 17
++    comparison                     shift and go to state 18
+ 
+ state 13
+ 
+     (7) where_clause_opt -> empty .
+ 
++    ORDER           reduce using rule 7 (where_clause_opt -> empty .)
++    LIMIT           reduce using rule 7 (where_clause_opt -> empty .)
+     SEMICOLON       reduce using rule 7 (where_clause_opt -> empty .)
+ 
+ 
+ state 14
+ 
+-    (1) query -> SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLON .
++    (1) query -> SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt . limit_clause_opt SEMICOLON
++    (27) limit_clause_opt -> . LIMIT NUMBER
++    (28) limit_clause_opt -> . empty
++    (29) empty -> .
+ 
+-    $end            reduce using rule 1 (query -> SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLON .)
++    LIMIT           shift and go to state 21
++    SEMICOLON       reduce using rule 29 (empty -> .)
+ 
++    limit_clause_opt               shift and go to state 20
++    empty                          shift and go to state 22
+ 
+ state 15
+ 
++    (20) order_by_clause_opt -> ORDER . BY order_list
++
++    BY              shift and go to state 23
++
++
++state 16
++
++    (21) order_by_clause_opt -> empty .
++
++    LIMIT           reduce using rule 21 (order_by_clause_opt -> empty .)
++    SEMICOLON       reduce using rule 21 (order_by_clause_opt -> empty .)
++
++
++state 17
++
+     (6) where_clause_opt -> WHERE condition .
+     (8) condition -> condition . AND condition
+     (9) condition -> condition . OR condition
+ 
++    ORDER           reduce using rule 6 (where_clause_opt -> WHERE condition .)
++    LIMIT           reduce using rule 6 (where_clause_opt -> WHERE condition .)
+     SEMICOLON       reduce using rule 6 (where_clause_opt -> WHERE condition .)
+-    AND             shift and go to state 18
+-    OR              shift and go to state 19
++    AND             shift and go to state 24
++    OR              shift and go to state 25
+ 
+ 
+-state 16
++state 18
+ 
+     (10) condition -> comparison .
+ 
+     AND             reduce using rule 10 (condition -> comparison .)
+     OR              reduce using rule 10 (condition -> comparison .)
++    ORDER           reduce using rule 10 (condition -> comparison .)
++    LIMIT           reduce using rule 10 (condition -> comparison .)
+     SEMICOLON       reduce using rule 10 (condition -> comparison .)
+ 
+ 
+-state 17
++state 19
+ 
+     (11) comparison -> IDENTIFIER . operator literal
+     (12) operator -> . EQ
+@@ -218,16 +272,51 @@ state 17
+     (16) operator -> . GE
+     (17) operator -> . LE
+ 
+-    EQ              shift and go to state 21
+-    NE              shift and go to state 22
+-    GT              shift and go to state 23
+-    LT              shift and go to state 24
+-    GE              shift and go to state 25
+-    LE              shift and go to state 26
++    EQ              shift and go to state 27
++    NE              shift and go to state 28
++    GT              shift and go to state 29
++    LT              shift and go to state 30
++    GE              shift and go to state 31
++    LE              shift and go to state 32
+ 
+-    operator                       shift and go to state 20
++    operator                       shift and go to state 26
+ 
+-state 18
++state 20
++
++    (1) query -> SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt . SEMICOLON
++
++    SEMICOLON       shift and go to state 33
++
++
++state 21
++
++    (27) limit_clause_opt -> LIMIT . NUMBER
++
++    NUMBER          shift and go to state 34
++
++
++state 22
++
++    (28) limit_clause_opt -> empty .
++
++    SEMICOLON       reduce using rule 28 (limit_clause_opt -> empty .)
++
++
++state 23
++
++    (20) order_by_clause_opt -> ORDER BY . order_list
++    (22) order_list -> . order_item
++    (23) order_list -> . order_list COMMA order_item
++    (24) order_item -> . IDENTIFIER
++    (25) order_item -> . IDENTIFIER ASC
++    (26) order_item -> . IDENTIFIER DESC
++
++    IDENTIFIER      shift and go to state 37
++
++    order_list                     shift and go to state 35
++    order_item                     shift and go to state 36
++
++state 24
+ 
+     (8) condition -> condition AND . condition
+     (8) condition -> . condition AND condition
+@@ -235,12 +324,12 @@ state 18
+     (10) condition -> . comparison
+     (11) comparison -> . IDENTIFIER operator literal
+ 
+-    IDENTIFIER      shift and go to state 17
++    IDENTIFIER      shift and go to state 19
+ 
+-    condition                      shift and go to state 27
+-    comparison                     shift and go to state 16
++    condition                      shift and go to state 38
++    comparison                     shift and go to state 18
+ 
+-state 19
++state 25
+ 
+     (9) condition -> condition OR . condition
+     (8) condition -> . condition AND condition
+@@ -248,23 +337,23 @@ state 19
+     (10) condition -> . comparison
+     (11) comparison -> . IDENTIFIER operator literal
+ 
+-    IDENTIFIER      shift and go to state 17
++    IDENTIFIER      shift and go to state 19
+ 
+-    condition                      shift and go to state 28
+-    comparison                     shift and go to state 16
++    condition                      shift and go to state 39
++    comparison                     shift and go to state 18
+ 
+-state 20
++state 26
+ 
+     (11) comparison -> IDENTIFIER operator . literal
+     (18) literal -> . NUMBER
+     (19) literal -> . STRING
+ 
+-    NUMBER          shift and go to state 30
+-    STRING          shift and go to state 31
++    NUMBER          shift and go to state 41
++    STRING          shift and go to state 42
+ 
+-    literal                        shift and go to state 29
++    literal                        shift and go to state 40
+ 
+-state 21
++state 27
+ 
+     (12) operator -> EQ .
+ 
+@@ -272,7 +361,7 @@ state 21
+     STRING          reduce using rule 12 (operator -> EQ .)
+ 
+ 
+-state 22
++state 28
+ 
+     (13) operator -> NE .
+ 
+@@ -280,7 +369,7 @@ state 22
+     STRING          reduce using rule 13 (operator -> NE .)
+ 
+ 
+-state 23
++state 29
+ 
+     (14) operator -> GT .
+ 
+@@ -288,7 +377,7 @@ state 23
+     STRING          reduce using rule 14 (operator -> GT .)
+ 
+ 
+-state 24
++state 30
+ 
+     (15) operator -> LT .
+ 
+@@ -296,7 +385,7 @@ state 24
+     STRING          reduce using rule 15 (operator -> LT .)
+ 
+ 
+-state 25
++state 31
+ 
+     (16) operator -> GE .
+ 
+@@ -304,7 +393,7 @@ state 25
+     STRING          reduce using rule 16 (operator -> GE .)
+ 
+ 
+-state 26
++state 32
+ 
+     (17) operator -> LE .
+ 
+@@ -312,7 +401,53 @@ state 26
+     STRING          reduce using rule 17 (operator -> LE .)
+ 
+ 
+-state 27
++state 33
++
++    (1) query -> SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON .
++
++    $end            reduce using rule 1 (query -> SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON .)
++
++
++state 34
++
++    (27) limit_clause_opt -> LIMIT NUMBER .
++
++    SEMICOLON       reduce using rule 27 (limit_clause_opt -> LIMIT NUMBER .)
++
++
++state 35
++
++    (20) order_by_clause_opt -> ORDER BY order_list .
++    (23) order_list -> order_list . COMMA order_item
++
++    LIMIT           reduce using rule 20 (order_by_clause_opt -> ORDER BY order_list .)
++    SEMICOLON       reduce using rule 20 (order_by_clause_opt -> ORDER BY order_list .)
++    COMMA           shift and go to state 43
++
++
++state 36
++
++    (22) order_list -> order_item .
++
++    COMMA           reduce using rule 22 (order_list -> order_item .)
++    LIMIT           reduce using rule 22 (order_list -> order_item .)
++    SEMICOLON       reduce using rule 22 (order_list -> order_item .)
++
++
++state 37
++
++    (24) order_item -> IDENTIFIER .
++    (25) order_item -> IDENTIFIER . ASC
++    (26) order_item -> IDENTIFIER . DESC
++
++    COMMA           reduce using rule 24 (order_item -> IDENTIFIER .)
++    LIMIT           reduce using rule 24 (order_item -> IDENTIFIER .)
++    SEMICOLON       reduce using rule 24 (order_item -> IDENTIFIER .)
++    ASC             shift and go to state 44
++    DESC            shift and go to state 45
++
++
++state 38
+ 
+     (8) condition -> condition AND condition .
+     (8) condition -> condition . AND condition
+@@ -320,49 +455,97 @@ state 27
+ 
+     AND             reduce using rule 8 (condition -> condition AND condition .)
+     OR              reduce using rule 8 (condition -> condition AND condition .)
++    ORDER           reduce using rule 8 (condition -> condition AND condition .)
++    LIMIT           reduce using rule 8 (condition -> condition AND condition .)
+     SEMICOLON       reduce using rule 8 (condition -> condition AND condition .)
+ 
+-  ! AND             [ shift and go to state 18 ]
+-  ! OR              [ shift and go to state 19 ]
++  ! AND             [ shift and go to state 24 ]
++  ! OR              [ shift and go to state 25 ]
+ 
+ 
+-state 28
++state 39
+ 
+     (9) condition -> condition OR condition .
+     (8) condition -> condition . AND condition
+     (9) condition -> condition . OR condition
+ 
+     OR              reduce using rule 9 (condition -> condition OR condition .)
++    ORDER           reduce using rule 9 (condition -> condition OR condition .)
++    LIMIT           reduce using rule 9 (condition -> condition OR condition .)
+     SEMICOLON       reduce using rule 9 (condition -> condition OR condition .)
+-    AND             shift and go to state 18
++    AND             shift and go to state 24
+ 
+   ! AND             [ reduce using rule 9 (condition -> condition OR condition .) ]
+-  ! OR              [ shift and go to state 19 ]
++  ! OR              [ shift and go to state 25 ]
+ 
+ 
+-state 29
++state 40
+ 
+     (11) comparison -> IDENTIFIER operator literal .
+ 
+     AND             reduce using rule 11 (comparison -> IDENTIFIER operator literal .)
+     OR              reduce using rule 11 (comparison -> IDENTIFIER operator literal .)
++    ORDER           reduce using rule 11 (comparison -> IDENTIFIER operator literal .)
++    LIMIT           reduce using rule 11 (comparison -> IDENTIFIER operator literal .)
+     SEMICOLON       reduce using rule 11 (comparison -> IDENTIFIER operator literal .)
+ 
+ 
+-state 30
++state 41
+ 
+     (18) literal -> NUMBER .
+ 
+     AND             reduce using rule 18 (literal -> NUMBER .)
+     OR              reduce using rule 18 (literal -> NUMBER .)
++    ORDER           reduce using rule 18 (literal -> NUMBER .)
++    LIMIT           reduce using rule 18 (literal -> NUMBER .)
+     SEMICOLON       reduce using rule 18 (literal -> NUMBER .)
+ 
+ 
+-state 31
++state 42
+ 
+     (19) literal -> STRING .
+ 
+     AND             reduce using rule 19 (literal -> STRING .)
+     OR              reduce using rule 19 (literal -> STRING .)
++    ORDER           reduce using rule 19 (literal -> STRING .)
++    LIMIT           reduce using rule 19 (literal -> STRING .)
+     SEMICOLON       reduce using rule 19 (literal -> STRING .)
+ 
++
++state 43
++
++    (23) order_list -> order_list COMMA . order_item
++    (24) order_item -> . IDENTIFIER
++    (25) order_item -> . IDENTIFIER ASC
++    (26) order_item -> . IDENTIFIER DESC
++
++    IDENTIFIER      shift and go to state 37
++
++    order_item                     shift and go to state 46
++
++state 44
++
++    (25) order_item -> IDENTIFIER ASC .
++
++    COMMA           reduce using rule 25 (order_item -> IDENTIFIER ASC .)
++    LIMIT           reduce using rule 25 (order_item -> IDENTIFIER ASC .)
++    SEMICOLON       reduce using rule 25 (order_item -> IDENTIFIER ASC .)
++
++
++state 45
++
++    (26) order_item -> IDENTIFIER DESC .
++
++    COMMA           reduce using rule 26 (order_item -> IDENTIFIER DESC .)
++    LIMIT           reduce using rule 26 (order_item -> IDENTIFIER DESC .)
++    SEMICOLON       reduce using rule 26 (order_item -> IDENTIFIER DESC .)
++
++
++state 46
++
++    (23) order_list -> order_list COMMA order_item .
++
++    COMMA           reduce using rule 23 (order_list -> order_list COMMA order_item .)
++    LIMIT           reduce using rule 23 (order_list -> order_list COMMA order_item .)
++    SEMICOLON       reduce using rule 23 (order_list -> order_list COMMA order_item .)
++
+diff --git a/sql_to_mongo_transpiler/parser/parsetab.py b/sql_to_mongo_transpiler/parser/parsetab.py
+index 957dddd..e2dcf7c 100644
+--- a/sql_to_mongo_transpiler/parser/parsetab.py
++++ b/sql_to_mongo_transpiler/parser/parsetab.py
+@@ -6,9 +6,9 @@ _tabversion = '3.10'
+ 
+ _lr_method = 'LALR'
+ 
+-_lr_signature = 'leftORleftANDAND COMMA EQ FROM GE GT IDENTIFIER LE LT NE NUMBER OR SELECT SEMICOLON STAR STRING WHEREquery : SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLONselect_list : STARselect_list : column_listcolumn_list : IDENTIFIERcolumn_list : column_list COMMA IDENTIFIERwhere_clause_opt : WHERE condition\n                            | emptycondition : condition AND condition\n                     | condition OR conditioncondition : comparisoncomparison : IDENTIFIER operator literaloperator : EQ\n                    | NE\n                    | GT\n                    | LT\n                    | GE\n                    | LEliteral : NUMBERliteral : STRINGempty :'
++_lr_signature = 'leftORleftANDAND ASC BY COMMA DESC EQ FROM GE GT IDENTIFIER LE LIMIT LT NE NUMBER OR ORDER SELECT SEMICOLON STAR STRING WHEREquery : SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLONselect_list : STARselect_list : column_listcolumn_list : IDENTIFIERcolumn_list : column_list COMMA IDENTIFIERwhere_clause_opt : WHERE condition\n                            | emptycondition : condition AND condition\n                     | condition OR conditioncondition : comparisoncomparison : IDENTIFIER operator literaloperator : EQ\n                    | NE\n                    | GT\n                    | LT\n                    | GE\n                    | LEliteral : NUMBERliteral : STRINGorder_by_clause_opt : ORDER BY order_list\n                               | emptyorder_list : order_itemorder_list : order_list COMMA order_itemorder_item : IDENTIFIERorder_item : IDENTIFIER ASC\n                      | IDENTIFIER DESClimit_clause_opt : LIMIT NUMBER\n                            | emptyempty :'
+     
+-_lr_action_items = {'SELECT':([0,],[2,]),'$end':([1,14,],[0,-1,]),'STAR':([2,],[5,]),'IDENTIFIER':([2,7,8,12,18,19,],[4,9,10,17,17,17,]),'FROM':([3,4,5,6,10,],[7,-4,-2,-3,-5,]),'COMMA':([4,6,10,],[-4,8,-5,]),'WHERE':([9,],[12,]),'SEMICOLON':([9,11,13,15,16,27,28,29,30,31,],[-20,14,-7,-6,-10,-8,-9,-11,-18,-19,]),'AND':([15,16,27,28,29,30,31,],[18,-10,-8,18,-11,-18,-19,]),'OR':([15,16,27,28,29,30,31,],[19,-10,-8,-9,-11,-18,-19,]),'EQ':([17,],[21,]),'NE':([17,],[22,]),'GT':([17,],[23,]),'LT':([17,],[24,]),'GE':([17,],[25,]),'LE':([17,],[26,]),'NUMBER':([20,21,22,23,24,25,26,],[30,-12,-13,-14,-15,-16,-17,]),'STRING':([20,21,22,23,24,25,26,],[31,-12,-13,-14,-15,-16,-17,]),}
++_lr_action_items = {'SELECT':([0,],[2,]),'$end':([1,33,],[0,-1,]),'STAR':([2,],[5,]),'IDENTIFIER':([2,7,8,12,23,24,25,43,],[4,9,10,19,37,19,19,37,]),'FROM':([3,4,5,6,10,],[7,-4,-2,-3,-5,]),'COMMA':([4,6,10,35,36,37,44,45,46,],[-4,8,-5,43,-22,-24,-25,-26,-23,]),'WHERE':([9,],[12,]),'ORDER':([9,11,13,17,18,38,39,40,41,42,],[-29,15,-7,-6,-10,-8,-9,-11,-18,-19,]),'LIMIT':([9,11,13,14,16,17,18,35,36,37,38,39,40,41,42,44,45,46,],[-29,-29,-7,21,-21,-6,-10,-20,-22,-24,-8,-9,-11,-18,-19,-25,-26,-23,]),'SEMICOLON':([9,11,13,14,16,17,18,20,22,34,35,36,37,38,39,40,41,42,44,45,46,],[-29,-29,-7,-29,-21,-6,-10,33,-28,-27,-20,-22,-24,-8,-9,-11,-18,-19,-25,-26,-23,]),'BY':([15,],[23,]),'AND':([17,18,38,39,40,41,42,],[24,-10,-8,24,-11,-18,-19,]),'OR':([17,18,38,39,40,41,42,],[25,-10,-8,-9,-11,-18,-19,]),'EQ':([19,],[27,]),'NE':([19,],[28,]),'GT':([19,],[29,]),'LT':([19,],[30,]),'GE':([19,],[31,]),'LE':([19,],[32,]),'NUMBER':([21,26,27,28,29,30,31,32,],[34,41,-12,-13,-14,-15,-16,-17,]),'STRING':([26,27,28,29,30,31,32,],[42,-12,-13,-14,-15,-16,-17,]),'ASC':([37,],[44,]),'DESC':([37,],[45,]),}
+ 
+ _lr_action = {}
+ for _k, _v in _lr_action_items.items():
+@@ -17,7 +17,7 @@ for _k, _v in _lr_action_items.items():
+       _lr_action[_x][_k] = _y
+ del _lr_action_items
+ 
+-_lr_goto_items = {'query':([0,],[1,]),'select_list':([2,],[3,]),'column_list':([2,],[6,]),'where_clause_opt':([9,],[11,]),'empty':([9,],[13,]),'condition':([12,18,19,],[15,27,28,]),'comparison':([12,18,19,],[16,16,16,]),'operator':([17,],[20,]),'literal':([20,],[29,]),}
++_lr_goto_items = {'query':([0,],[1,]),'select_list':([2,],[3,]),'column_list':([2,],[6,]),'where_clause_opt':([9,],[11,]),'empty':([9,11,14,],[13,16,22,]),'order_by_clause_opt':([11,],[14,]),'condition':([12,24,25,],[17,38,39,]),'comparison':([12,24,25,],[18,18,18,]),'limit_clause_opt':([14,],[20,]),'operator':([19,],[26,]),'order_list':([23,],[35,]),'order_item':([23,43,],[36,46,]),'literal':([26,],[40,]),}
+ 
+ _lr_goto = {}
+ for _k, _v in _lr_goto_items.items():
+@@ -27,7 +27,7 @@ for _k, _v in _lr_goto_items.items():
+ del _lr_goto_items
+ _lr_productions = [
+   ("S' -> query","S'",1,None,None,None),
+-  ('query -> SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLON','query',6,'p_query','sql_parser.py',19),
++  ('query -> SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON','query',8,'p_query','sql_parser.py',19),
+   ('select_list -> STAR','select_list',1,'p_select_list_star','sql_parser.py',23),
+   ('select_list -> column_list','select_list',1,'p_select_list_columns','sql_parser.py',27),
+   ('column_list -> IDENTIFIER','column_list',1,'p_column_list_single','sql_parser.py',31),
+@@ -46,5 +46,14 @@ _lr_productions = [
+   ('operator -> LE','operator',1,'p_operator','sql_parser.py',65),
+   ('literal -> NUMBER','literal',1,'p_literal_number','sql_parser.py',69),
+   ('literal -> STRING','literal',1,'p_literal_string','sql_parser.py',73),
+-  ('empty -> <empty>','empty',0,'p_empty','sql_parser.py',77),
++  ('order_by_clause_opt -> ORDER BY order_list','order_by_clause_opt',3,'p_order_by_clause_opt','sql_parser.py',77),
++  ('order_by_clause_opt -> empty','order_by_clause_opt',1,'p_order_by_clause_opt','sql_parser.py',78),
++  ('order_list -> order_item','order_list',1,'p_order_list_single','sql_parser.py',84),
++  ('order_list -> order_list COMMA order_item','order_list',3,'p_order_list_multiple','sql_parser.py',88),
++  ('order_item -> IDENTIFIER','order_item',1,'p_order_item_default','sql_parser.py',92),
++  ('order_item -> IDENTIFIER ASC','order_item',2,'p_order_item_direction','sql_parser.py',96),
++  ('order_item -> IDENTIFIER DESC','order_item',2,'p_order_item_direction','sql_parser.py',97),
++  ('limit_clause_opt -> LIMIT NUMBER','limit_clause_opt',2,'p_limit_clause_opt','sql_parser.py',101),
++  ('limit_clause_opt -> empty','limit_clause_opt',1,'p_limit_clause_opt','sql_parser.py',102),
++  ('empty -> <empty>','empty',0,'p_empty','sql_parser.py',109),
+ ]
+diff --git a/sql_to_mongo_transpiler/parser/sql_parser.py b/sql_to_mongo_transpiler/parser/sql_parser.py
+index 4f49f57..fc94c6a 100644
+--- a/sql_to_mongo_transpiler/parser/sql_parser.py
++++ b/sql_to_mongo_transpiler/parser/sql_parser.py
+@@ -1,6 +1,6 @@
+ import ply.yacc as yacc
+ from sql_to_mongo_transpiler.lexer.sql_lexer import SqlLexer
+-from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison
++from sql_to_mongo_transpiler.ast.nodes import SelectQuery, LogicalCondition, Comparison,OrderByItem
+ 
+ class SqlParser:
+     def __init__(self):
+@@ -11,13 +11,13 @@ class SqlParser:
+ 
+     # Precedence rules
+     precedence = (
+-        ('left', 'OR'),
++            ('left', 'OR'), 
+         ('left', 'AND'),
+     )
+ 
+     def p_query(self, p):
+-        '''query : SELECT select_list FROM IDENTIFIER where_clause_opt SEMICOLON'''
+-        p[0] = SelectQuery(columns=p[2], table=p[4], where=p[5])
++        '''query : SELECT select_list FROM IDENTIFIER where_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON'''
++        p[0] = SelectQuery(columns=p[2], table=p[4], where=p[5],order_by=p[6],limit=p[7])
+ 
+     def p_select_list_star(self, p):
+         '''select_list : STAR'''
+@@ -73,6 +73,38 @@ class SqlParser:
+         '''literal : STRING'''
+         p[0] = p[1]
+ 
++    def p_order_by_clause_opt(self, p):
++        '''order_by_clause_opt : ORDER BY order_list
++                               | empty'''
++        if len(p) == 4:
++            p[0] = p[3]
++        else:
++            p[0] = []
++    def p_order_list_single(self, p):
++        '''order_list : order_item'''
++        p[0] = [p[1]]
++
++    def p_order_list_multiple(self, p):
++        '''order_list : order_list COMMA order_item'''
++        p[0] = p[1] + [p[3]]
++
++    def p_order_item_default(self, p):
++        '''order_item : IDENTIFIER'''
++        p[0] = OrderByItem(column=p[1],direction="ASC")
++
++    def p_order_item_direction(self, p):
++        '''order_item : IDENTIFIER ASC
++                      | IDENTIFIER DESC'''
++        p[0] = OrderByItem(column=p[1],direction=p[2])
++
++    def p_limit_clause_opt(self, p):
++        '''limit_clause_opt : LIMIT NUMBER
++                            | empty'''
++        if len(p) == 3:
++            p[0] = p[2]
++        else:
++            p[0] = None
++
+     def p_empty(self, p):
+         '''empty :'''
+         pass
