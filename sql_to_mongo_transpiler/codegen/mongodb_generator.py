@@ -83,7 +83,12 @@ class MongoDBGenerator:
         if node.limit is not None:
             pipeline.append({"$limit": node.limit})
 
-        return f"db.{node.table}.aggregate({pipeline})"
+        #return f"db.{node.table}.aggregate({pipeline})"
+        return {
+                "string": f"db.{node.table}.aggregate({pipeline})",
+                "collection": node.table,
+                "pipeline": pipeline
+                }
 
     def _generate_find(self, node: SelectQuery):
         collection = node.table
@@ -109,7 +114,18 @@ class MongoDBGenerator:
 
         if node.limit is not None:
             query += f".limit({node.limit})"
-        return query
+        #return query
+        result={
+                "string": query,
+                "collection": collection,
+                "filter": filter_doc,
+                "projection": projection
+                }
+        if node.order_by:
+            result["sort"] = sort_doc
+        if node.limit is not None:
+            result["limit"] = node.limit
+        return result
     def _format_mongo_shell(self, obj):
         """Recursively formats Python objects to MongoDB shell syntax (keys unquoted)."""
         if isinstance(obj, dict):

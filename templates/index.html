@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQL → MongoDB Transpiler</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0d1117;
+    --surface2: #111820;
+    --border: #1e2d3d;
+    --border2: #243447;
+    --text: #cdd9e5;
+    --text-dim: #5a7184;
+    --text-muted: #3d5166;
+    --sql: #f7c948;
+    --mongo: #00d4aa;
+    --accent: #3b82f6;
+    --accent2: #6366f1;
+    --error: #f87171;
+    --success: #34d399;
+    --glow-sql: rgba(247, 201, 72, 0.12);
+    --glow-mongo: rgba(0, 212, 170, 0.12);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── TOPBAR ─────────────────────────────── */
+  .topbar {
+    height: 56px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, var(--sql), var(--mongo));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+
+  .logo-text {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .logo-text span.arrow {
+    color: var(--text-dim);
+    margin: 0 4px;
+  }
+
+  .logo-text span.sql { color: var(--sql); }
+  .logo-text span.mongo { color: var(--mongo); }
+
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .status-dot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: background 0.3s;
+  }
+
+  .dot.connected { background: var(--success); box-shadow: 0 0 8px var(--success); }
+  .dot.error { background: var(--error); }
+
+  .run-btn {
+    height: 34px;
+    padding: 0 18px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    transition: opacity 0.2s, transform 0.1s;
+    letter-spacing: 0.03em;
+  }
+
+  .run-btn:hover { opacity: 0.88; }
+  .run-btn:active { transform: scale(0.97); }
+  .run-btn.loading { opacity: 0.6; pointer-events: none; }
+
+  .run-btn svg { width: 14px; height: 14px; }
+
+  /* ── MAIN LAYOUT ─────────────────────────── */
+  .workspace {
+    display: grid;
+    grid-template-columns: 280px 1fr 1fr;
+    grid-template-rows: 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── SIDEBAR ─────────────────────────────── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-section {
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .sidebar-section.schema-section {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .section-header {
+    padding: 12px 16px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.2s;
+  }
+
+  .section-header:hover { color: var(--text-dim); }
+
+  .section-header .chevron {
+    margin-left: auto;
+    transition: transform 0.2s;
+    opacity: 0.5;
+  }
+
+  .section-header.open .chevron { transform: rotate(90deg); }
+
+  .section-content {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .schema-tree {
+    padding: 8px 12px 12px;
+  }
+
+  .table-node {
+    margin-bottom: 6px;
+  }
+
+  .table-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border-radius: 5px;
+    font-size: 12px;
+    color: var(--sql);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .table-name:hover { background: var(--glow-sql); }
+
+  .table-name .tbl-icon { opacity: 0.7; font-size: 11px; }
+
+  .field-list {
+    padding: 2px 0 4px 18px;
+  }
+
+  .field-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: default;
+  }
+
+  .field-name { color: var(--text); opacity: 0.85; }
+
+  .field-type {
+    color: var(--text-muted);
+    font-size: 10px;
+    margin-left: auto;
+    text-transform: uppercase;
+  }
+
+  .field-pk {
+    font-size: 9px;
+    color: var(--sql);
+    border: 1px solid var(--sql);
+    border-radius: 3px;
+    padding: 0 3px;
+    opacity: 0.7;
+  }
+
+  .quick-queries {
+    padding: 8px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .quick-q {
+    padding: 6px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.5;
+  }
+
+  .quick-q:hover {
+    border-color: var(--accent);
+    color: var(--text);
+    background: rgba(59, 130, 246, 0.06);
+  }
+
+  /* ── PANELS ──────────────────────────────── */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .panel.sql-panel { border-right: 1px solid var(--border); }
+
+  .panel-header {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+
+  .panel-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .panel-label.sql { color: var(--sql); }
+  .panel-label.mongo { color: var(--mongo); }
+
+  .panel-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 99px;
+    font-weight: 500;
+  }
+
+  .panel-badge.sql { background: var(--glow-sql); color: var(--sql); border: 1px solid rgba(247,201,72,0.2); }
+  .panel-badge.mongo { background: var(--glow-mongo); color: var(--mongo); border: 1px solid rgba(0,212,170,0.2); }
+
+  .panel-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  /* ── EDITOR ──────────────────────────────── */
+  .editor-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .line-numbers {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 36px;
+    padding: 14px 0 14px;
+    text-align: right;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.7;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .editor {
+    width: 100%;
+    min-height: 120px;
+    max-height: 180px;
+    background: var(--surface2);
+    color: var(--text);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    padding: 14px 14px 14px 48px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    resize: none;
+    outline: none;
+    caret-color: var(--sql);
+    transition: box-shadow 0.2s;
+    box-sizing: border-box;
+  }
+
+  .editor:focus {
+    box-shadow: inset 0 0 0 1px rgba(247,201,72,0.25);
+  }
+
+  .editor.mongo-editor {
+    caret-color: var(--mongo);
+    color: var(--mongo);
+    min-height: 100px;
+    background: var(--surface);
+  }
+
+  .editor.mongo-editor:focus {
+    box-shadow: inset 0 0 0 1px rgba(0,212,170,0.2);
+  }
+
+  /* ── RESULTS SECTION ─────────────────────── */
+  .results-area {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .results-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .rtab {
+    padding: 8px 16px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+  }
+
+  .rtab:hover { color: var(--text-dim); }
+  .rtab.active.sql { color: var(--sql); border-bottom-color: var(--sql); }
+  .rtab.active.mongo { color: var(--mongo); border-bottom-color: var(--mongo); }
+
+  .results-count {
+    margin-left: auto;
+    padding: 8px 16px;
+    font-size: 10px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .result-pane {
+    flex: 1;
+    overflow-y: auto;
+    display: none;
+  }
+
+  .result-pane.active { display: block; }
+
+  .result-table-wrap {
+    overflow-x: auto;
+    min-height: 100%;
+  }
+
+  table.result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  table.result-table th {
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    padding: 8px 14px;
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    z-index: 1;
+  }
+
+  table.result-table td {
+    padding: 7px 14px;
+    border-bottom: 1px solid rgba(30,45,61,0.5);
+    color: var(--text);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  table.result-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  table.result-table td.num { color: var(--accent); }
+  table.result-table td.str { color: var(--success); }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    color: var(--text-muted);
+    font-size: 12px;
+    gap: 8px;
+  }
+
+  .empty-icon { font-size: 24px; opacity: 0.4; }
+
+  /* ── MONGO PANEL ─────────────────────────── */
+  .mongo-query-section {
+    flex-shrink: 0;
+  }
+
+  /* ── ERROR BANNER ────────────────────────── */
+  .error-banner {
+    display: none;
+    margin: 10px 16px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    background: rgba(248,113,113,0.1);
+    border: 1px solid rgba(248,113,113,0.3);
+    color: var(--error);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .error-banner.visible { display: block; }
+
+  /* ── SCROLLBAR ───────────────────────────── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2e4057; }
+
+  /* ── SPINNER ─────────────────────────────── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  /* ── COPY BTN ────────────────────────────── */
+  .copy-btn {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    transition: all 0.15s;
+  }
+
+  .copy-btn:hover { color: var(--text); border-color: var(--border2); }
+
+  /* ── EXEC TIME ───────────────────────────── */
+  .exec-time {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 0 16px;
+  }
+
+  /* ── RESPONSIVE ──────────────────────────── */
+  @media (max-width: 900px) {
+    .workspace { grid-template-columns: 220px 1fr; grid-template-rows: 1fr 1fr; }
+    .sidebar { grid-row: 1 / 3; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div class="logo-text">
+      <span class="sql">SQL</span>
+      <span class="arrow">→</span>
+      <span class="mongo">MongoDB</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="status-dot" id="pgStatus">
+      <div class="dot" id="pgDot"></div>
+      PostgreSQL
+    </div>
+    <div class="status-dot" id="mongoStatus">
+      <div class="dot" id="mongoDot"></div>
+      MongoDB
+    </div>
+    <span class="exec-time" id="execTime"></span>
+    <button class="run-btn" id="runBtn" onclick="runAll()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      Run Query
+    </button>
+  </div>
+</div>
+
+<!-- WORKSPACE -->
+<div class="workspace">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+
+    <!-- Quick queries -->
+    <div class="sidebar-section">
+      <div class="section-header open" onclick="toggleSection(this)">
+        <span>⚡</span> Quick Queries
+        <span class="chevron">›</span>
+      </div>
+      <div class="section-content">
+        <div class="quick-queries" id="quickQueries">
+          <button class="quick-q" onclick="setQuery(this.innerText)">SELECT * FROM users;</button>
+          <button class="quick-q" onclick="setQuery(this.innerText)">SELECT * FROM users WHERE age &gt; 20;</button>
+          <button class="quick-q" onclick="setQuery(this.innerText)">SELECT name, email FROM users WHERE age &lt; 30;</button>
+          <button class="quick-q" onclick="setQuery(this.innerText)">SELECT * FROM users WHERE name = 'Alice';</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Schema -->
+    <div class="sidebar-section schema-section">
+      <div class="section-header open" onclick="toggleSection(this)">
+        <span>🗂</span> Schema
+        <span class="chevron">›</span>
+      </div>
+      <div class="section-content">
+        <div class="schema-tree" id="schemaTree">
+          <div style="color:var(--text-muted);font-size:11px;padding:8px;">Loading schema…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SQL PANEL -->
+  <div class="panel sql-panel">
+    <div class="panel-header">
+      <span class="panel-label sql">SQL</span>
+      <span class="panel-badge sql">PostgreSQL 14</span>
+      <button class="copy-btn" onclick="copyText('sqlEditor')">copy</button>
+    </div>
+    <div class="panel-body">
+
+      <!-- Editor -->
+      <div class="editor-wrap">
+        <div class="line-numbers" id="sqlLines">1</div>
+        <textarea class="editor" id="sqlEditor"
+          oninput="updateLines(this,'sqlLines')"
+          onkeydown="handleTab(event)"
+          spellcheck="false"
+          placeholder="Enter your SQL query…">SELECT * FROM users WHERE age > 20;</textarea>
+      </div>
+
+      <div class="error-banner" id="errorBanner"></div>
+
+      <!-- Results -->
+      <div class="results-area">
+        <div class="results-tabs">
+          <div class="rtab active sql" data-pane="sqlResult" onclick="switchTab(this,'sql')">SQL Results</div>
+          <div class="results-count" id="sqlCount"></div>
+        </div>
+        <div class="result-pane active" id="sqlResult">
+          <div class="empty-state">
+            <div class="empty-icon">🗄</div>
+            <div>Run a query to see results</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MONGO PANEL -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-label mongo">MongoDB</span>
+      <span class="panel-badge mongo">mongosh</span>
+      <button class="copy-btn" onclick="copyText('mongoEditor')">copy</button>
+    </div>
+    <div class="panel-body">
+
+      <!-- Generated Mongo Query -->
+      <div class="mongo-query-section">
+        <div style="padding:8px 16px 4px;font-size:10px;color:var(--text-muted);letter-spacing:0.08em;text-transform:uppercase;">Generated Query</div>
+        <div class="editor-wrap">
+          <textarea class="editor mongo-editor" id="mongoEditor"
+            readonly
+            spellcheck="false"
+            placeholder="Transpiled MongoDB query will appear here…"></textarea>
+        </div>
+      </div>
+
+      <!-- Mongo Results -->
+      <div class="results-area">
+        <div class="results-tabs">
+          <div class="rtab active mongo" data-pane="mongoResult" onclick="switchTab(this,'mongo')">Mongo Results</div>
+          <div class="results-count" id="mongoCount"></div>
+        </div>
+        <div class="result-pane active" id="mongoResult">
+          <div class="empty-state">
+            <div class="empty-icon">🍃</div>
+            <div>Run a query to see results</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── INIT ──────────────────────────────────────────────
+window.onload = async () => {
+  updateLines(document.getElementById('sqlEditor'), 'sqlLines');
+
+  try {
+    const res = await fetch('/schema');
+    const schema = await res.json();
+    renderSchemaTree(schema);
+    window._schema = schema;
+    document.getElementById('pgDot').classList.add('connected');
+    document.getElementById('mongoDot').classList.add('connected');
+  } catch(e) {
+    document.getElementById('pgDot').classList.add('error');
+    document.getElementById('mongoDot').classList.add('error');
+  }
+};
+
+// ── SCHEMA RENDERER ───────────────────────────────────
+function renderSchemaTree(schema) {
+  const tree = document.getElementById('schemaTree');
+  tree.innerHTML = '';
+
+  const tables = schema.tables || schema;
+  const arr = Array.isArray(tables) ? tables : Object.keys(tables).map(t => ({
+    name: t,
+    columns: tables[t]
+  }));
+
+  arr.forEach(tbl => {
+    const node = document.createElement('div');
+    node.className = 'table-node';
+
+    const header = document.createElement('div');
+    header.className = 'table-name';
+    header.innerHTML = `<span class="tbl-icon">▤</span> ${tbl.name}`;
+    header.onclick = () => fields.style.display = fields.style.display === 'none' ? '' : 'none';
+
+    const fields = document.createElement('div');
+    fields.className = 'field-list';
+
+    const cols = tbl.columns || [];
+    cols.forEach(col => {
+      const f = document.createElement('div');
+      f.className = 'field-item';
+      const isPK = col.primary_key || col.pk;
+      f.innerHTML = `
+        <span class="field-name">${col.name}</span>
+        ${isPK ? '<span class="field-pk">PK</span>' : ''}
+        <span class="field-type">${col.type || col.data_type || ''}</span>
+      `;
+      fields.appendChild(f);
+    });
+
+    node.appendChild(header);
+    node.appendChild(fields);
+    tree.appendChild(node);
+  });
+}
+
+// ── RUN QUERY ─────────────────────────────────────────
+async function runAll() {
+  const sql = document.getElementById('sqlEditor').value.trim();
+  if (!sql) return;
+
+  const btn = document.getElementById('runBtn');
+  btn.classList.add('loading');
+  btn.innerHTML = '<span class="spinner"></span> Running…';
+
+  hideError();
+  clearResults();
+
+  const t0 = performance.now();
+
+  try {
+    const schemaRes = await fetch('/schema');
+    const schema = await schemaRes.json();
+
+    const res = await fetch('/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, schema })
+    });
+
+    const data = await res.json();
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+    document.getElementById('execTime').textContent = `${elapsed}s`;
+
+    if (data.error) {
+      showError(data.error);
+    } else {
+      document.getElementById('mongoEditor').value = data.mongo;
+
+      renderTable('sqlResult', data.sql_result, data.columns, 'sql', 'sqlCount');
+      renderMongoResult('mongoResult', data.mongo_result, 'mongoCount');
+    }
+
+  } catch(err) {
+    showError('Network error: ' + err.message);
+  } finally {
+    btn.classList.remove('loading');
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Run Query`;
+  }
+}
+
+// ── RENDER SQL TABLE ──────────────────────────────────
+function renderTable(paneId, rows, columns, type, countId) {
+  const pane = document.getElementById(paneId);
+  const countEl = document.getElementById(countId);
+
+  if (!rows || rows.length === 0) {
+    pane.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div>No rows returned</div></div>';
+    countEl.textContent = '0 rows';
+    return;
+  }
+
+  // rows is array of arrays for SQL
+  const headers = columns || rows[0].map((_, i) => `col_${i + 1}`);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'result-table-wrap';
+
+  const tbl = document.createElement('table');
+  tbl.className = 'result-table';
+
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  headers.forEach(h => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  tbl.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    const cells = Array.isArray(row) ? row : Object.values(row);
+    cells.forEach(val => {
+      const td = document.createElement('td');
+      td.textContent = val === null ? 'NULL' : val;
+      if (typeof val === 'number') td.className = 'num';
+      else if (typeof val === 'string') td.className = 'str';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+
+  wrap.appendChild(tbl);
+  pane.innerHTML = '';
+  pane.appendChild(wrap);
+  countEl.textContent = `${rows.length} row${rows.length !== 1 ? 's' : ''}`;
+}
+
+// ── RENDER MONGO RESULTS ──────────────────────────────
+function renderMongoResult(paneId, docs, countId) {
+  const pane = document.getElementById(paneId);
+  const countEl = document.getElementById(countId);
+
+  if (!docs || docs.length === 0) {
+    pane.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div>No documents returned</div></div>';
+    countEl.textContent = '0 docs';
+    return;
+  }
+
+  // Build unified table from keys
+  const keys = [...new Set(docs.flatMap(d => Object.keys(d)))];
+  const wrap = document.createElement('div');
+  wrap.className = 'result-table-wrap';
+
+  const tbl = document.createElement('table');
+  tbl.className = 'result-table';
+
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  keys.forEach(k => {
+    const th = document.createElement('th');
+    th.textContent = k;
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  tbl.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  docs.forEach(doc => {
+    const tr = document.createElement('tr');
+    keys.forEach(k => {
+      const td = document.createElement('td');
+      const val = doc[k];
+      td.textContent = val === undefined ? '—' : val === null ? 'null' : val;
+      if (typeof val === 'number') td.className = 'num';
+      else if (typeof val === 'string') td.className = 'str';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+
+  wrap.appendChild(tbl);
+  pane.innerHTML = '';
+  pane.appendChild(wrap);
+  countEl.textContent = `${docs.length} doc${docs.length !== 1 ? 's' : ''}`;
+}
+
+// ── UTILS ──────────────────────────────────────────────
+function clearResults() {
+  ['sqlResult', 'mongoResult'].forEach(id => {
+    document.getElementById(id).innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div>Running…</div></div>';
+  });
+  ['sqlCount', 'mongoCount', 'execTime'].forEach(id => {
+    document.getElementById(id).textContent = '';
+  });
+  document.getElementById('mongoEditor').value = '';
+}
+
+function showError(msg) {
+  const b = document.getElementById('errorBanner');
+  b.textContent = '⚠ ' + msg;
+  b.classList.add('visible');
+}
+
+function hideError() {
+  document.getElementById('errorBanner').classList.remove('visible');
+}
+
+function setQuery(q) {
+  const el = document.getElementById('sqlEditor');
+  el.value = q;
+  updateLines(el, 'sqlLines');
+  el.focus();
+}
+
+function updateLines(ta, linesId) {
+  const lines = ta.value.split('\n').length;
+  document.getElementById(linesId).innerHTML =
+    Array.from({length: lines}, (_, i) => i + 1).join('<br>');
+}
+
+function handleTab(e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const ta = e.target;
+    const s = ta.selectionStart;
+    ta.value = ta.value.substring(0, s) + '  ' + ta.value.substring(ta.selectionEnd);
+    ta.selectionStart = ta.selectionEnd = s + 2;
+  }
+}
+
+function switchTab(el, type) {
+  const parent = el.closest('.results-tabs');
+  parent.querySelectorAll('.rtab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active', type);
+
+  const paneId = el.dataset.pane;
+  const area = el.closest('.results-area');
+  area.querySelectorAll('.result-pane').forEach(p => p.classList.remove('active'));
+  document.getElementById(paneId).classList.add('active');
+}
+
+function toggleSection(header) {
+  header.classList.toggle('open');
+  const content = header.nextElementSibling;
+  content.style.display = header.classList.contains('open') ? '' : 'none';
+}
+
+async function copyText(id) {
+  const txt = document.getElementById(id).value;
+  await navigator.clipboard.writeText(txt).catch(() => {});
+}
+</script>
+</body>
+</html>
