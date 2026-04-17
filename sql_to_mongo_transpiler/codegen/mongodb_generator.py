@@ -7,15 +7,150 @@ class MongoDBGenerator:
             if isinstance(col, Aggregate):
                 return True
         return False
-
+    def _get_schema_columns(self, node, table):
+        # quick helper if schema not available here
+        # ideally pass schema to generator, but for now:
+        return []  # TEMP (see better fix below)
+    def _generate_join(self, node):
+        tables = node.table
+        left_table = tables[0]
+        right_table = tables[1]
+        join_cond, filter_list = self._split_conditions(node.where)
+        if not join_cond:
+            raise ValueError("JOIN condition not found")
+        left = join_cond.identifier
+        right = join_cond.value
+        # Determine mapping
+        if left["table"] == left_table:
+            localField = left["column"]
+            foreignField = right["column"]
+        else:
+            localField = right["column"]
+            foreignField = left["column"]
+        pipeline = []
+        # $lookup
+        pipeline.append({
+            "$lookup": {
+                "from": right_table,
+                "localField": localField,
+                "foreignField": foreignField,
+                "as": right_table
+            }
+        })
+        pipeline.append({
+            "$unwind": f"${right_table}"
+            })
+        # filter condition
+        if filter_list:
+            if len(filter_list) == 1:
+                match = self._generate_filter(filter_list[0])
+            else:
+                match = {
+                        "$and": [self._generate_filter(f) for f in filter_list]
+                        }
+            pipeline.append({"$match": match})
+        # $project
+        projection = {}
+        for col in node.columns:
+            # --- normalize column ---
+            if isinstance(col, dict):
+                table = col.get("table")
+                field = col.get("column")
+            elif isinstance(col, str):
+                if "." in col:
+                    table, field = col.split(".")
+                else:
+                    matches = [t for t in node.table if col in self.schema[t]]
+                    if len(matches) == 1:
+                        table = matches[0]
+                        field = col
+                    else:
+                        raise ValueError(f"Ambiguous column '{col}' in JOIN")
+            else:
+                continue
+            # --- projection mapping ---
+            if table == right_table:
+                projection[f"{right_table}.{field}"] = 1
+            else:
+                projection[field] = 1
+        pipeline.append({"$project": projection})
+        return {
+            "string": f"db.{left_table}.aggregate({pipeline})",
+            "collection": left_table,
+            "pipeline": pipeline
+            }
     def generate(self, ast):
         if isinstance(ast,SelectQuery):
+            if isinstance(ast.table, list) and len(ast.table) > 1:
+                return self._generate_join(ast)
+            # Aggregation
             if self._has_aggregate(ast) or ast.group_by:
                 return self._generate_aggregate(ast)
-            elif isinstance(ast, SelectQuery):
-                return self._generate_find(ast)
+            # Normal SELECT
+            return self._generate_find(ast)
         else:
             raise ValueError(f"Unsupported AST node: {type(ast)}")
+    def _split_conditions(self, node):
+        if isinstance(node, Comparison):
+            if isinstance(node.value, dict):
+                return node, []
+            else:
+                return None, [node]
+        elif isinstance(node, LogicalCondition):
+            left_join, left_filters = self._split_conditions(node.left)
+            right_join, right_filters = self._split_conditions(node.right)
+            join = left_join or right_join
+            filters = left_filters + right_filters
+            return join, filters
+        return None, []
+    def _generate_lookup(self, node):
+        join = node.join
+        #print("DEBUG JOIN:", node.join, type(node.join))
+        base_table = join.get("left_table")
+        foreign_table = join.get("right_table")
+        pipeline = []
+        # $lookup
+        pipeline.append({
+            "$lookup": {
+                "from": foreign_table,
+                "localField": join.get("left_col"),
+                "foreignField": join.get("right_col"),
+                "as": foreign_table
+            }
+        })
+        pipeline.append({
+            "$unwind": f"${foreign_table}"
+            })
+        if hasattr(node, "filter_condition") and node.filter_condition:
+            pipeline.append({
+               "$match": self._generate_filter(node.filter_condition)
+                })
+        # $project
+        projection = {}
+        for col in node.columns:
+            # --- normalize ---
+            if isinstance(col, dict):
+                table = col.get("table")
+                field = col.get("column")
+            elif isinstance(col, str):
+                if "." in col:
+                    table, field = col.split(".")
+                else:
+                    table = None
+                    field = col
+            else:
+                continue
+            # --- assign projection ---
+            if table == foreign_table:
+                projection[f"{table}.{field}"] = 1
+            else:
+                projection[field] = 1
+        pipeline.append({"$project": projection})
+        return {
+                "string": f"db.{base_table}.aggregate({json.dumps(pipeline, indent=2)})",
+                "collection": base_table,
+                "pipeline": pipeline
+                }
     def _generate_aggregate(self, node):
         pipeline = []
         # WHERE → $match
@@ -152,12 +287,18 @@ class MongoDBGenerator:
     def _generate_projection(self, columns):
         if columns == ['*']:
             return None
-        
+    
         projection = {}
+    
         for col in columns:
-            projection[col] = 1
-        return projection
+            if isinstance(col, dict):
+                column_name = col["column"]
+            else:
+                column_name = col
+        
+            projection[column_name] = 1
 
+        return projection
     def _generate_filter(self, node):
         if isinstance(node, LogicalCondition):
             return self._handle_logical(node)
@@ -198,7 +339,13 @@ class MongoDBGenerator:
             else:
                 field = f"{func.lower()}_{column}"
         else:
-            field = identifier
+            if isinstance(identifier, dict):
+                if identifier["table"]:
+                    field = f"{identifier['table']}.{identifier['column']}"
+                else:
+                    field = identifier["column"]
+            else:
+                field = identifier
         # Direct equality check
         if operator == '=':
             return {field: value}

@@ -16,13 +16,18 @@ class SqlParser:
     )
 
     def p_query(self, p):
-        '''query : SELECT select_list FROM IDENTIFIER where_clause_opt group_by_clause_opt having_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON'''
-        p[0] = SelectQuery(columns=p[2], table=p[4], where=p[5],group_by=p[6],having=p[7],order_by=p[8],limit=p[9])
+        '''query : SELECT select_list FROM table_list where_clause_opt group_by_clause_opt having_clause_opt order_by_clause_opt limit_clause_opt SEMICOLON'''
+        p[0] = SelectQuery(columns=p[2], table=p[4][0] if len(p[4])==1 else p[4], where=p[5],group_by=p[6],having=p[7],order_by=p[8],limit=p[9])
 
     def p_select_list_star(self, p):
         '''select_list : STAR'''
         p[0] = ['*']
-
+    def p_table_list_single(self, p):
+        '''table_list : IDENTIFIER'''
+        p[0] = [p[1]]
+    def p_table_list_multi(self, p):
+        '''table_list : table_list COMMA IDENTIFIER'''
+        p[0] = p[1] + [p[3]]
     def p_select_list_columns(self, p):
         '''select_list : column_list'''
         p[0] = p[1]
@@ -36,7 +41,7 @@ class SqlParser:
         p[0] = p[1] + [p[3]]
 
     def p_column_identifier(self,p):
-        '''column : IDENTIFIER'''
+        '''column : identifier'''
         p[0]=p[1]
 
     def p_column_aggregate(self, p):
@@ -83,14 +88,15 @@ class SqlParser:
             p[0] = None
 
     def p_condition_visual(self, p):
-        '''condition : condition AND condition
-                     | condition OR condition'''
+        '''condition : condition AND term
+                     | condition OR term'''
         p[0] = LogicalCondition(left=p[1], operator=p[2], right=p[3])
-
-    def p_condition_comparison(self, p):
-        '''condition : comparison'''
+    def p_condition_term(self, p):
+        '''condition : term'''
         p[0] = p[1]
-
+    def p_term(self, p):
+        '''term : comparison'''
+        p[0] = p[1]
     def p_aggregate_expr(self, p):
         '''aggregate_expr : COUNT LPAREN STAR RPAREN
                           | COUNT LPAREN IDENTIFIER RPAREN
@@ -104,8 +110,9 @@ class SqlParser:
             p[0] = Aggregate(p[1].upper(), p[3])
 
     def p_comparison(self, p):
-        '''comparison : IDENTIFIER operator literal
-                      | aggregate_expr operator literal'''
+        '''comparison : identifier operator identifier
+                  | identifier operator literal
+                  | aggregate_expr operator literal'''
         if isinstance(p[1],Aggregate):
             p[0] = Comparison(identifier=p[1], operator=p[2], value=p[3])
         else:
@@ -186,6 +193,20 @@ class SqlParser:
     def p_empty(self, p):
         '''empty :'''
         pass
+
+    def p_identifier(self, p):
+        '''identifier : IDENTIFIER
+                      | IDENTIFIER DOT IDENTIFIER'''
+        if len(p) == 2:
+            p[0] = {
+                "table": None,
+                "column": p[1]
+            }
+        else:
+            p[0] = {
+                "table": p[1],
+                "column": p[3]
+            }
 
     def p_error(self, p):
         if p:

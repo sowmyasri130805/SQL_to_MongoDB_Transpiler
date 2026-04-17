@@ -42,7 +42,8 @@ class SqlLexer:
         'AVG',
         'SUM',
         'GROUP',
-        'HAVING'
+        'HAVING',
+        'DOT'
     )
 
     # Regular expression rules for simple tokens
@@ -57,6 +58,7 @@ class SqlLexer:
     t_STAR = r'\*'
     t_LPAREN=r'\('
     t_RPAREN=r'\)'
+    t_DOT=r'\.'
     # Ignored characters (whitespace)
     t_ignore = ' \t'
 
