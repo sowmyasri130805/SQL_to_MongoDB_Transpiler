@@ -245,6 +245,10 @@ class SemanticAnalyzer:
 
     def validate_comparison(self, node: Comparison, tables):
         tables = tables if isinstance(tables, list) else [tables]
+        if node.operator == "IN_SUBQUERY":
+            # validate subquery recursively
+            self.validate_query(node.value)
+            return
         if ((isinstance(node.identifier, dict) or (isinstance(node.identifier, str) and "." in node.identifier))and(isinstance(node.value, dict) or (isinstance(node.value, str) and "." in node.value))):
             left = node.identifier
             right = node.value

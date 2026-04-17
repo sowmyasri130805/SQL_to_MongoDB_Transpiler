@@ -79,9 +79,24 @@ class MongoDBGenerator:
             "collection": left_table,
             "pipeline": pipeline
             }
+    def _contains_in_subquery(self, node):
+        from sql_to_mongo_transpiler.ast.nodes import LogicalCondition, Comparison
+
+        if isinstance(node, Comparison):
+            return node.operator == "IN_SUBQUERY"
+
+        if isinstance(node, LogicalCondition):
+            return (
+                self._contains_in_subquery(node.left) or
+                self._contains_in_subquery(node.right)
+            )
+
+        return False
     def generate(self, ast):
         if isinstance(ast,SelectQuery):
             self.current_base_table = ast.table
+            if ast.where and self._contains_in_subquery(ast.where):
+                return self._generate_in_subquery(ast)
             if hasattr(ast, "joins") and ast.joins:
                 return self._generate_explicit_join(ast)
             if isinstance(ast.table, list) and len(ast.table) > 1:
@@ -444,4 +459,58 @@ class MongoDBGenerator:
             direction = 1 if item.direction.upper() == "ASC" else -1
             sort_doc[item.column] = direction
         return sort_doc
+    def _generate_in_subquery(self, node):
+        condition = node.where
 
+        # assume simple condition: id IN (subquery)
+        identifier = condition.identifier
+        subquery = condition.value
+
+        # base table
+        base_table = node.table
+
+        # extract base field
+        if isinstance(identifier, dict):
+            base_field = identifier["column"]
+        else:
+            base_field = identifier
+
+        # extract subquery info
+        sub_table = subquery.table
+        sub_column = subquery.columns[0]["column"]
+
+        pipeline = []
+
+        #  $lookup
+        pipeline.append({
+            "$lookup": {
+                "from": sub_table,
+                "localField": base_field,
+                "foreignField": sub_column,
+                "as": sub_table
+            }
+        })
+
+        #  match non-empty (IN logic)
+        pipeline.append({
+            "$match": {
+                sub_table: {"$ne": []}
+            }
+        })
+
+        # optional projection (reuse your logic)
+        projection = {}
+        for col in node.columns:
+            if isinstance(col, dict):
+                projection[col["column"]] = 1
+            elif isinstance(col, str):
+                projection[col] = 1
+
+        if projection:
+            pipeline.append({"$project": projection})
+
+        return {
+            "string": f"db.{base_table}.aggregate({pipeline})",
+            "collection": base_table,
+            "pipeline": pipeline
+        }

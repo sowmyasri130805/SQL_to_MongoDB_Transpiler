@@ -170,14 +170,46 @@ class SqlParser:
         '''literal_list : literal_list COMMA literal'''
         p[0] = p[1] + [p[3]]
 
+    def p_comparison_in_subquery(self, p):
+        '''
+        comparison : identifier IN LPAREN query_no_semicolon RPAREN
+        '''
+        print("DEBUG: subquery rule triggered")
+        p[0] = Comparison(
+            identifier=p[1],
+            operator="IN_SUBQUERY",
+            value=p[4]   #  AST of subquery
+        )
+    def p_query_no_semicolon(self, p):
+        '''
+        query_no_semicolon : SELECT select_list FROM table_list where_clause_opt group_by_clause_opt having_clause_opt order_by_clause_opt limit_clause_opt
+        '''
+        table_data = p[4]
+
+        if isinstance(table_data, dict):
+            base_table = table_data["base"]
+        elif isinstance(table_data, list):
+            base_table = table_data[0] if len(table_data) == 1 else table_data
+        else:
+            base_table = table_data
+
+        p[0] = SelectQuery(
+            columns=p[2],
+            table=base_table,
+            joins=table_data["joins"] if isinstance(table_data, dict) else [],
+            where=p[5],
+            group_by=p[6],
+            having=p[7],
+            order_by=p[8],
+            limit=p[9]
+        )
     def p_comparison_in(self, p):
-        '''comparison : IDENTIFIER IN LPAREN literal_list RPAREN'''
+        '''comparison : identifier IN LPAREN literal_list RPAREN'''
         p[0] = Comparison(
                 identifier=p[1],
                 operator="IN",
                 value=p[4]
-                )
-
+        )
     def p_operator(self, p):
         '''operator : EQ
                     | NE
