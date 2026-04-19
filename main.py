@@ -15,7 +15,7 @@ import ast
 
 def run_sql(query):
     conn = psycopg2.connect(
-        dbname="testdb",
+        dbname="transpiler_db",
         user="postgres",
         password="password",  # change if needed
         host="localhost",
@@ -29,7 +29,7 @@ def run_sql(query):
 
 
 client = MongoClient("mongodb://localhost:27017/")
-db = client["testdb"]
+db = client["transpiler_db"]
 
 def run_mongo(collection, query, projection=None):
     return list(db[collection].find(query, projection))

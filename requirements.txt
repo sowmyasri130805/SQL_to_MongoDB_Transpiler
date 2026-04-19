@@ -1,2 +1,6 @@
 ply
 pytest
+pymongo
+psycopg2-binary
+psycopg
+flask

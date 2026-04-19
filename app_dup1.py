@@ -11,11 +11,11 @@ app = Flask(__name__)
 
 # DB connections
 mongo_client = MongoClient("mongodb://localhost:27017/")
-mongo_db = mongo_client["testdb"]
+mongo_db = mongo_client["transpiler_db"]
 
 def run_sql(query):
     conn = psycopg2.connect(
-        dbname="testdb",
+        dbname="transpiler_db",
         user="postgres",
         password="password",
         host="localhost",
