@@ -106,8 +106,9 @@ class SqlLexer:
         return t
 
     def t_newline(self, t):
-        r'\n+'
-        t.lexer.lineno += len(t.value)
+        r'(\r\n|\n|\r)+'
+        # Correctly evaluate line increments adjusting for 2-element \r\n characters
+        t.lexer.lineno += max(t.value.count('\n'), t.value.count('\r'))
 
     def find_column(self, input_data, token):
         line_start = input_data.rfind('\n', 0, token.lexpos) + 1
