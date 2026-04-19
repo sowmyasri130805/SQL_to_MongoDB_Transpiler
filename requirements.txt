@@ -4,3 +4,7 @@ pymongo
 psycopg2-binary
 psycopg
 flask
+fastapi
+uvicorn
+jinja2
+python-multipart
