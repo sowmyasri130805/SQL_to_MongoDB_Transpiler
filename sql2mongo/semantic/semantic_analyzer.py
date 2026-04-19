@@ -155,7 +155,10 @@ class SemanticAnalyzer:
             else:
                 raise SemanticError(f"Invalid column type: {col}")
             # --- DUPLICATE CHECK ---
-            key = f"{table}.{column_name}"
+            if isinstance(col, Aggregate):
+                key = f"agg_{col.func}_{table}.{column_name}"
+            else:
+                key = f"{table}.{column_name}"
             if key in seen:
                 raise SemanticError(f"Duplicate column '{column_name}' in SELECT list")
             seen.add(key)
@@ -313,6 +316,14 @@ class SemanticAnalyzer:
         else:
             col_name = identifier
             col_table = None
+
+        #if identifier is aggregate
+        if isinstance(col_name, Aggregate):
+            # Just validate literal type
+            if not isinstance(node.value, (int, str)):
+                raise SemanticError("Invalid HAVING condition value")
+            return
+
         # resolve correct table
         if col_table:
             if col_table not in self.schema:
@@ -332,13 +343,7 @@ class SemanticAnalyzer:
             if len(matches) > 1:
                 raise SemanticError(f"Ambiguous column '{col_name}'")
             expected_type = self.schema[matches[0]][col_name]
-        
-        #if identifier is aggregate
-        if isinstance(col_name, Aggregate):
-            # Just validate literal type
-            if not isinstance(node.value, (int, str)):
-                raise SemanticError("Invalid HAVING condition value")
-            return
+
         actual_value = node.value
 
         # ----- BETWEEN -----
