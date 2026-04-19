@@ -243,13 +243,24 @@ class SqlParser:
         p[0] = p[1] + [p[3]]
 
     def p_order_item_default(self, p):
-        '''order_item : IDENTIFIER'''
-        p[0] = OrderByItem(column=p[1],direction="ASC")
+        '''order_item : IDENTIFIER
+                      | aggregate_expr'''
+        if isinstance(p[1], Aggregate):
+            col_name = "count" if p[1].func == "COUNT" and p[1].column == "*" else f"{p[1].func.lower()}_{p[1].column}"
+            p[0] = OrderByItem(column=col_name, direction="ASC")
+        else:
+            p[0] = OrderByItem(column=p[1], direction="ASC")
 
     def p_order_item_direction(self, p):
         '''order_item : IDENTIFIER ASC
-                      | IDENTIFIER DESC'''
-        p[0] = OrderByItem(column=p[1],direction=p[2])
+                      | IDENTIFIER DESC
+                      | aggregate_expr ASC
+                      | aggregate_expr DESC'''
+        if isinstance(p[1], Aggregate):
+            col_name = "count" if p[1].func == "COUNT" and p[1].column == "*" else f"{p[1].func.lower()}_{p[1].column}"
+            p[0] = OrderByItem(column=col_name, direction=p[2])
+        else:
+            p[0] = OrderByItem(column=p[1], direction=p[2])
 
     def p_limit_clause_opt(self, p):
         '''limit_clause_opt : LIMIT NUMBER

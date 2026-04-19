@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL to MongoDB Transpiler</title>
+    <!-- Modern Font: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+
+<body>
+    <div class="glass-container">
+        <div class="header">
+            <h1>SQL to Mongo<span class="highlight">DB</span> Transpiler</h1>
+            <p>Convert relational queries to NoSQL execution pipelines in milliseconds.</p>
+        </div>
+
+        <form id="transpileForm" class="transpiler-form">
+            <div class="input-group">
+                <label for="schemaFile">Database Schema JSON</label>
+                <div class="file-upload">
+                    <input type="file" id="schemaFile" name="schema" accept=".json" required />
+                    <div class="upload-placeholder">
+                        <span id="fileName">Select or Drop schema.json</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="queryInput">SQL Query Snippet</label>
+                <textarea id="queryInput" name="query" rows="5" placeholder="SELECT * FROM users WHERE age > 20;"
+                    required></textarea>
+            </div>
+
+            <button type="submit" id="convertBtn" class="glow-button">
+                <span>Transpile Query</span>
+                <div class="spinner hidden" id="spinner"></div>
+            </button>
+        </form>
+
+        <div id="resultContainer" class="result-container hidden">
+            <div class="result-header">
+                <h3>MongoDB Output</h3>
+            </div>
+            <div id="queriesList"></div>
+        </div>
+
+        <div id="errorContainer" class="error-container hidden">
+            <h4>Transpilation Error</h4>
+            <pre id="errorMsg"></pre>
+        </div>
+    </div>
+
+    <!-- Vanilla Javascript Interfacing -->
+    <script>
+        const fileInput = document.getElementById("schemaFile");
+        const fileNameSpan = document.getElementById("fileName");
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                fileNameSpan.textContent = e.target.files[0].name;
+                fileNameSpan.style.color = "#10b981"; // Highlight to show success
+            }
+        });
+
+        document.getElementById("transpileForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const btn = document.getElementById("convertBtn");
+            const spinner = document.getElementById("spinner");
+            const resultBox = document.getElementById("resultContainer");
+            const errorBox = document.getElementById("errorContainer");
+
+            // UI Loading logic
+            btn.classList.add("loading");
+            spinner.classList.remove("hidden");
+            resultBox.classList.add("hidden");
+            errorBox.classList.add("hidden");
+
+            const formData = new FormData(e.target);
+
+            try {
+                const response = await fetch("/transpile", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const listDiv = document.getElementById("queriesList");
+                    listDiv.innerHTML = ""; // Clear old paths securely
+
+                    data.queries.forEach((q, index) => {
+                        const pre = document.createElement("pre");
+                        pre.style.marginTop = index > 0 ? "15px" : "0px";
+
+                        // Style error responses dynamically
+                        if (q.startsWith("Error:")) {
+                            pre.style.background = "rgba(239, 68, 68, 0.1)";
+                            pre.style.color = "#ef4444";
+                            pre.style.border = "1px solid rgba(239, 68, 68, 0.4)";
+                        }
+
+                        pre.textContent = q;
+                        listDiv.appendChild(pre);
+                    });
+
+                    resultBox.classList.remove("hidden");
+                } else {
+                    document.getElementById("errorMsg").textContent = data.error;
+                    errorBox.classList.remove("hidden");
+                }
+            } catch (err) {
+                document.getElementById("errorMsg").textContent = "Network error or Server offline.";
+                errorBox.classList.remove("hidden");
+            } finally {
+                btn.classList.remove("loading");
+                spinner.classList.add("hidden");
+            }
+        });
+    </script>
+</body>
+
+</html>

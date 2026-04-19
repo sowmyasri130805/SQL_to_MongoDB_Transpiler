@@ -1,0 +1,4 @@
+SELECT city, COUNT(*) 
+FROM users 
+GROUP BY city 
+ORDER BY COUNT(*) DESC;

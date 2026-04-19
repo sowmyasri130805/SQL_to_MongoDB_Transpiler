@@ -176,6 +176,12 @@ def test_order_by_group_by(transpiler):
     limit_stage = next(stage["$limit"] for stage in pipeline if "$limit" in stage)
     assert limit_stage == 10
 
+def test_order_by_count_star(transpiler):
+    res = transpiler("SELECT city, COUNT(*) FROM users GROUP BY city ORDER BY COUNT(*) DESC;")
+    pipeline = res["pipeline"]
+    sort_stage = next(stage["$sort"] for stage in pipeline if "$sort" in stage)
+    assert sort_stage == {"count": -1}
+
 # ----------------- JOINS -----------------
 def test_explicit_join(transpiler):
     res = transpiler("SELECT users.name, orders.amount FROM users JOIN orders ON users.id = orders.user_id;")
