@@ -3,14 +3,39 @@ import ast
 
 
 class MongoOptimizer:
+    def _format_mongo_shell(self, obj):
+        if isinstance(obj, dict):
+            items = [f"{k}: {self._format_mongo_shell(v)}" for k, v in obj.items()]
+            return "{ " + ", ".join(items) + " }"
+        elif isinstance(obj, list):
+            items = [self._format_mongo_shell(i) for i in obj]
+            return "[ " + ", ".join(items) + " ]"
+        elif isinstance(obj, str):
+            return f'"{obj}"'
+        else:
+            return str(obj)
+
     def _rebuild_find_query(self, mongo_data):
         collection = mongo_data["collection"]
         filter_dict = mongo_data.get("filter", {})
         projection = mongo_data.get("projection")
 
+        filter_str = self._format_mongo_shell(filter_dict) if filter_dict else "{}"
+        
         if projection:
-            return f"db.{collection}.find({filter_dict}, {projection})"
-        return f"db.{collection}.find({filter_dict})"
+            proj_str = self._format_mongo_shell(projection)
+            query = f"db.{collection}.find({filter_str}, {proj_str})"
+        else:
+            query = f"db.{collection}.find({filter_str})"
+            
+        if "sort" in mongo_data:
+            sort_str = self._format_mongo_shell(mongo_data["sort"])
+            query += f".sort({sort_str})"
+            
+        if "limit" in mongo_data:
+            query += f".limit({mongo_data['limit']})"
+            
+        return query
     def _sort_in_operator(self, doc):
         if isinstance(doc, dict):
             for k, v in doc.items():
