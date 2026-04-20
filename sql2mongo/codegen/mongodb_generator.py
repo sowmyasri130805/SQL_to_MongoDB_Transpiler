@@ -141,7 +141,9 @@ class MongoDBGenerator:
             match = self._generate_filter(node.where)
             pipeline.append({"$match": match})
         #  projection (reuse your logic)
-        projection = {}
+        #projection = {}
+        add_fields = {}
+        clean_projection = {}
         for col in node.columns:
             if isinstance(col, dict):
                 table = col.get("table")
@@ -155,10 +157,12 @@ class MongoDBGenerator:
             else:
                 continue
             if table == join_table:
-                projection[f"{join_table}.{field}"] = 1
-            else:
-                projection[field] = 1
-        pipeline.append({"$project": projection})
+                add_fields[field] = f"${join_table}.{field}"
+            
+            clean_projection[field] = 1
+        if add_fields:
+            pipeline.append({"$addFields": add_fields})
+        pipeline.append({"$project": clean_projection})
         return {
             "string": f"db.{base_table}.aggregate({pipeline})",
             "collection": base_table,
@@ -293,11 +297,47 @@ class MongoDBGenerator:
             pipeline.append({"$limit": node.limit})
 
         #return f"db.{node.table}.aggregate({pipeline})"
-        return {
+        result = {
                 "string": f"db.{node.table}.aggregate({pipeline})",
                 "collection": node.table,
                 "pipeline": pipeline
                 }
+        if node.order_by:
+            result["sort"] = self._generate_sort(node.order_by)
+        if node.limit is not None:
+            result["limit"] = node.limit
+        # $project to rename _id back to group_by column name(s)
+        project_stage = {}
+        if node.group_by:
+            if len(node.group_by) == 1:
+                project_stage[node.group_by[0]] = "$_id"  # city: "$_id"
+            else:
+                for col in node.group_by:
+                    project_stage[col] = f"$_id.{col}"
+        project_stage["_id"] = 0  # hide _id
+
+        # also expose aggregate fields
+        for col in node.columns:
+            if isinstance(col, Aggregate):
+                func = col.func
+                column = col.column
+                if func == "COUNT":
+                    if column == "*":
+                        project_stage["count"] = 1
+                    else:
+                        project_stage[f"count_{column}"] = 1
+                elif func in ["MIN", "MAX", "AVG", "SUM"]:
+                    project_stage[f"{func.lower()}_{column}"] = 1
+
+        pipeline.append({"$project": project_stage})
+
+        return {
+            "string": f"db.{node.table}.aggregate({pipeline})",
+            "collection": node.table,
+            "pipeline": pipeline
+        }
+        return result
+
 
     def _generate_find(self, node: SelectQuery):
         collection = node.table
